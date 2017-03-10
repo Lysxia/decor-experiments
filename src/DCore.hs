@@ -16,6 +16,7 @@ import Control.Applicative
 import Control.Monad
 import Data.Foldable
 
+import GHC.Exts (Constraint)
 import GHC.Generics
 import Generics.OneLiner
 
@@ -112,12 +113,14 @@ type instance Coercion  (Partial f r)
 data TODO = TODO
   deriving (Eq, Show)
 
+data UnifyKind = Unify | Weak
+
 class (Monad m, Alternative m) => MonadGen m where
   data URef m :: * -> *  -- Unifiable reference
   newRef :: m (URef m a)
   getRef :: URef m a -> m (Maybe a)
   setRef :: URef m a -> a -> m ()
-  mergeRef :: URef m a -> URef m a -> m ()
+  mergeRef :: UnifyKind -> URef m a -> URef m a -> m ()
   choose :: [(Int, a)] -> m a
   continue :: [(Int, m ())] -> m ()
   redundant :: [m ()] -> m ()
@@ -127,35 +130,68 @@ ref :: MonadGen m => a -> m (URef m a)
 ref a = newRef >>= \r -> setRef r a *> return r
 
 class MonadGen m => Unifiable m a where
-  unify :: a -> a -> m ()
+  unify_ :: UnifyKind -> a -> a -> m ()
+  shallowCopy :: a -> m a
+
+unify :: Unifiable m a => a -> a -> m ()
+unify = unify_ Unify
+
+weakUnify :: Unifiable m a => a -> a -> m ()
+weakUnify = unify_ Weak
 
 instance Unifiable m a => Unifiable m (URef m a) where
-  unify r s = do
+  unify_ u r s = do
     ma <- getRef r
     mb <- getRef s
-    for_ ma $ \ a ->
-      for_ mb $ \ b ->
-        unify a b
-    mergeRef r s
+    case u of
+      Unify ->
+        for_ ma $ \ a ->
+          for_ mb $ \ b ->
+            unify_ u a b
+      Weak ->
+        case (ma, mb) of
+          (Nothing, Nothing) -> return ()
+          (Just a, Nothing) -> do
+            b <- shallowCopy a
+            setRef s b
+            weakUnify a b
+          (Nothing, Just b) -> do
+            a <- shallowCopy b
+            setRef r a
+            weakUnify a b
+          (Just a, Just b) -> do
+            weakUnify a b
+    mergeRef u r s
+
+  shallowCopy _ = newRef
 
 instance {-# OVERLAPPABLE #-} (MonadGen m, Eq a) => Unifiable m a where
-  unify a a'
+  unify_ _ a a'
     | a == a' = return ()
     | otherwise = empty
 
+  shallowCopy = return
+
 instance
   ( MonadGen m
-  , UnifiableFields m p
+  , Fields Unifiable m p
   ) => Unifiable m (DCore_ p) where
-  unify t t' = unAM
+  unify_ u t t' = unAM
     (mzipWith
       (For :: For (Unifiable m))
-      (\i j -> AM (unify i j))
+      (\i j -> AM (unify_ u i j))
       t
       t')
 
+  shallowCopy =
+    gtraverse
+      (For :: For (Unifiable m))
+      shallowCopy
+
 instance Unifiable m a => Unifiable m (EqProp a) where
-  unify (a :~: b) (a' :~: b') = unify a a' *> unify b b'
+  unify_ u (a :~: b) (a' :~: b') = unify_ u a a' *> unify_ u b b'
+
+  shallowCopy (a :~: b) = liftA2 (:~:) (shallowCopy a) (shallowCopy b)
 
 newtype AM m = AM { unAM :: m () }
 
@@ -163,15 +199,15 @@ instance Applicative m => Monoid (AM m) where
   mempty = AM (pure ())
   mappend (AM a) (AM b) = AM (a *> b)
 
-type UnifiableFields m p =
-  ( Unifiable m (VarT p)
-  , Unifiable m (BindVarT p)
-  , Unifiable m (FunT p)
-  , Unifiable m (RelT p)
-  , Unifiable m (DCore p)
-  , Unifiable m (CVarT p)
-  , Unifiable m (BindCVarT p)
-  , Unifiable m (Coercion p)
+type Fields (c :: (* -> *) -> * -> Constraint) m p =
+  ( c m (VarT p)
+  , c m (BindVarT p)
+  , c m (FunT p)
+  , c m (RelT p)
+  , c m (DCore p)
+  , c m (CVarT p)
+  , c m (BindCVarT p)
+  , c m (Coercion p)
   )
 
 (%) :: a -> b -> (a, b)
@@ -225,7 +261,7 @@ r &= a = do
   setRef r a
 
 gStar :: Generator m p
-gStar ctx tx ty = do
+gStar _ctx tx ty = do
   tx &= Star
   ty &= Star
 
@@ -240,6 +276,7 @@ gVar ctx tx ty = do
       [ 1 % return (n, ty')
       , 1 % pickVar (n + 1) xs
       ]
+    pickVar _ [] = empty
 
 gPi :: Generator m p
 gPi ctx tx ty = do
@@ -267,7 +304,6 @@ gAbs ctx tx ty = do
 gApp :: Generator m p
 gApp ctx tx ty = do
   rel <- choose [ 1 % Rel, 1 % Irr ]
-  tyFun <- newRef
   tyA <- newRef
   txFun <- newRef
   txArg <- newRef
@@ -277,6 +313,7 @@ gApp ctx tx ty = do
   tyFun <- ref (Pi rel () tyA tyB)
   generate ctx txFun tyFun
 
+-- Try to unify a with subterms of (what is going to be) B[a/x]
 unsubst
   :: (MonadGen m)
   => Ctx p
