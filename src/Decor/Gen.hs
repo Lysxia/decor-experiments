@@ -9,7 +9,7 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.ST
 import Control.Monad.Trans.Class
-import Data.STRef
+import Data.STRef hiding (writeSTRef)
 import QuickCheck.GenT hiding (MonadGen)
 
 class (Monad m, Alternative m) => MonadGen m where
@@ -69,16 +69,37 @@ instance Alternative (Gen r s) where
     in
       unGen ma k fail' s
 
+failing :: Gen r s a -> ST s () -> Gen r s a
+failing ma cleanup = Gen $ \ k fail s ->
+  let
+    fail' s = lift cleanup >> fail s
+  in
+    unGen ma k fail' s
+
 data Unknown r s a
   = Unknown (a -> Gen r s ())
   | Known a
+
+data Alias r s a
+  = Alias (STRef s (Alias r s a))
+  | Root !Int (Unknown r s a)
 
 maybeUnk :: Unknown r s a -> Maybe a
 maybeUnk (Known a) = Just a
 maybeUnk (Unknown _) = Nothing
 
+getRef' :: STRef s (Alias r s a) -> Gen r s (STRef s (Alias r s a), Int, Unknown r s a)
+getRef' = liftGST . getRef''
+
+getRef'' :: STRef s (Alias r s a) -> ST s (STRef s (Alias r s a), Int, Unknown r s a)
+getRef'' r = do
+  r_ <- readSTRef r
+  case r_ of
+    Root n u -> return (r, n, u)
+    Alias r' -> getRef'' r'
+
 instance MonadGen (Gen r s) where
-  newtype URef (Gen r s) a = GenURef (STRef s (Unknown r s a))
+  newtype URef (Gen r s) a = GenURef (STRef s (Alias r s a))
 
   newInteger = Gen $ \ k fail s ->
     let
@@ -87,11 +108,26 @@ instance MonadGen (Gen r s) where
     in
       k i fail s'
 
-  newRef = liftGST (GenURef <$> newSTRef (Unknown (\ _ -> return ())))
+  newRef = liftGST (GenURef <$> newSTRef (Root 1 (Unknown (\ _ -> return ()))))
 
-  getRef (GenURef r) = liftGST (maybeUnk <$> readSTRef r)
+  getRef (GenURef r) = maybeUnk . t3 <$> getRef' r
+    where t3 (_, _, c) = c
 
   setRef (GenURef r) a = do
-    a_ <- liftGST (readSTRef r)
+    (r', n, a_) <- getRef' r
+    writeRef r' (Root n (Known a))
     case a_ of Unknown k -> k a ; Known _ -> return ()
-    liftGST (writeSTRef r (Known a))
+
+  mergeRef (GenURef r) (GenURef s) = do
+    a_@(_, n, _) <- getRef' r
+    b_@(_, m, _) <- getRef' s
+    let ((r0, n0, a0), (s0, m0, b0)) | n > m = (a_, b_) | otherwise = (b_, a_)
+    writeRef s0 (Alias r0)
+    writeRef r0 (Root (n0 + m0) a0)
+
+writeSTRef r = modifySTRef' r . const
+
+writeRef r a = do
+  a0 <- liftGST (readSTRef r)
+  liftGST (writeSTRef r a)
+    `failing` writeSTRef r a0
