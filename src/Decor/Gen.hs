@@ -1,6 +1,7 @@
 -- | Random generation, with narrowing and backtracking.
 
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Decor.Gen where
@@ -12,6 +13,7 @@ import Control.Monad.Trans.Class
 import Data.STRef hiding (writeSTRef)
 import QuickCheck.GenT hiding (MonadGen)
 import qualified QuickCheck.GenT as GenT
+import qualified Test.QuickCheck.Gen as QC
 
 class (Monad m, Alternative m) => MonadGen m where
   data URef m :: * -> *  -- Unifiable reference
@@ -33,6 +35,9 @@ data S = S
   , counter :: !Integer
   }
 
+initS :: S
+initS = S 1000 0
+
 newtype Gen r s a = Gen
   { unGen
       :: (a -> (S -> G s r) -> S -> G s r)
@@ -40,6 +45,16 @@ newtype Gen r s a = Gen
       -> S
       -> G s r
   }
+
+runGen :: (forall s. Gen (Maybe a) s a) -> QC.Gen (Maybe a)
+runGen g = runG
+  (unGen g
+    (\ a _ _ -> return (Just a))
+    (\ _ -> return Nothing)
+    initS)
+
+runG :: (forall s. G s a) -> QC.Gen a
+runG m = QC.MkGen $ \ g sz -> runST (unGenT m g sz)
 
 liftG :: G s a -> Gen r s a
 liftG ma = Gen $ \ k fail s ->
@@ -146,9 +161,12 @@ choose_ totalW xs = do
     select w0 k ((w, x) : xs)
       | w < w0 = (w, x, k xs)
       | otherwise = select w0 (k . ((w, x) :)) xs
+    select _ _ _ = error "Should not happen."
 
+writeSTRef :: STRef s a -> a -> ST s ()
 writeSTRef r = modifySTRef' r . const
 
+writeRef :: STRef s a -> a -> Gen r s ()
 writeRef r a = do
   a0 <- liftGST (readSTRef r)
   liftGST (writeSTRef r a)
