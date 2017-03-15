@@ -11,6 +11,7 @@ import Control.Monad.ST
 import Control.Monad.Trans.Class
 import Data.STRef hiding (writeSTRef)
 import QuickCheck.GenT hiding (MonadGen)
+import qualified QuickCheck.GenT as GenT
 
 class (Monad m, Alternative m) => MonadGen m where
   data URef m :: * -> *  -- Unifiable reference
@@ -61,11 +62,11 @@ instance Monad (Gen r s) where
       fail s
 
 instance Alternative (Gen r s) where
-  empty = Gen $ \ _ fail -> fail
+  empty = Gen $ \ _ fail s -> fail s{ fuel = fuel s - 1 }
   ma <|> ma' = Gen $ \ k fail s ->
     let
       fail' s | fuel s == 0 = fail s
-      fail' s = unGen ma' k fail $! s{ fuel = fuel s - 1 }
+      fail' s = unGen ma' k fail s
     in
       unGen ma k fail' s
 
@@ -121,9 +122,30 @@ instance MonadGen (Gen r s) where
   mergeRef (GenURef r) (GenURef s) = do
     a_@(_, n, _) <- getRef' r
     b_@(_, m, _) <- getRef' s
-    let ((r0, n0, a0), (s0, m0, b0)) | n > m = (a_, b_) | otherwise = (b_, a_)
+    let ((r0, n0, a0), (s0, m0, _)) | n > m = (a_, b_) | otherwise = (b_, a_)
     writeRef s0 (Alias r0)
     writeRef r0 (Root (n0 + m0) a0)
+
+  bindRef (GenURef r) k = do
+    (r0, n, a') <- getRef' r
+    case a' of
+      Unknown k' -> writeRef r0 (Root n (Unknown (liftA2 (>>) k k')))
+      Known a -> k a
+
+  choose xs = choose_ totalW xs
+    where
+      totalW = sum [ w | (w, _) <- xs ]
+
+choose_ :: Int -> [(Int, a)] -> Gen r s a
+choose_ 0 _ = empty
+choose_ totalW xs = do
+  w0 <- liftG (GenT.choose (0, totalW - 1))
+  let (w, x, xs') = select w0 id xs
+  return x <|> choose_ (totalW - w) xs'
+  where
+    select w0 k ((w, x) : xs)
+      | w < w0 = (w, x, k xs)
+      | otherwise = select w0 (k . ((w, x) :)) xs
 
 writeSTRef r = modifySTRef' r . const
 
