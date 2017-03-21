@@ -1,5 +1,6 @@
 -- | Types for a dependently-typed calculus with coercions.
 
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE StandaloneDeriving #-}
@@ -8,6 +9,7 @@
 
 module Decor.Types where
 
+import GHC.Exts (Constraint)
 import GHC.Generics (Generic)
 
 type family VarT  p
@@ -21,7 +23,7 @@ type family Coercion p
 
 -- | Relevance
 data Rel = Rel | Irr
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 data DCore_ p
 
@@ -41,16 +43,25 @@ data DCore_ p
 
   deriving Generic
 
+type Syntax (c :: * -> Constraint) p =
+  ( c (VarT p)
+  , c (FunT p)
+  , c (RelT p)
+  , c (BindVarT p)
+  , c (BindCVarT p)
+  , c (CVarT p)
+  , c (DCore p)
+  , c (Coercion p)
+  )
+
 deriving instance
-  ( Show (VarT p)
-  , Show (FunT p)
-  , Show (RelT p)
-  , Show (BindVarT p)
-  , Show (BindCVarT p)
-  , Show (CVarT p)
-  , Show (DCore p)
-  , Show (Coercion p)
-  ) => Show (DCore_ p)
+  Syntax Eq p => Eq (DCore_ p)
+
+deriving instance
+  Syntax Ord p => Ord (DCore_ p)
+
+deriving instance
+  Syntax Show p => Show (DCore_ p)
 
 data Coercion_ p
   = CVar (CVarT p)
@@ -68,15 +79,10 @@ data Coercion_ p
   deriving Generic
 
 deriving instance
-  ( Show (VarT p), Show (FunT p), Show (RelT p), Show (BindVarT p)
-  , Show (DCore p)
-  , Show (BindCVarT p)
-  , Show (CVarT p)
-  , Show (Coercion p)
-  ) => Show (Coercion_ p)
+  Syntax Show p => Show (Coercion_ p)
 
 data EqProp a = (:~:) a a
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 newtype VarId = VarId Integer
   deriving (Eq, Ord, Show)

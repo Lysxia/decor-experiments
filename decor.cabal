@@ -18,6 +18,7 @@ library
     Decor.DC
     Decor.Gen
     Decor.Main
+    Decor.Soup
     Decor.Types
     Decor.Types.DC
   build-depends:
