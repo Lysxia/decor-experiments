@@ -61,7 +61,7 @@ data Coercion_ p
   | CRed (DCore p) (DCore p)
   | CAbs (RelT p) (BindVarT p) (Coercion p) (Coercion p)
   | CApp (Coercion p) (Coercion p) Rel
-  | CPi (BindVarT p) (Coercion p) (Coercion p)
+  | CPi (RelT p) (BindVarT p) (Coercion p) (Coercion p)
   | CCoAbs (BindCVarT p) (Coercion p) (Coercion p) (Coercion p)
   | CCoPi (BindCVarT p) (Coercion p) (Coercion p)
   | CCoApp (Coercion p) (Coercion p) (Coercion p)

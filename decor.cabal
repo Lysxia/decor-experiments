@@ -15,9 +15,11 @@ cabal-version:       >=1.10
 library
   hs-source-dirs:      src
   exposed-modules:
+    Decor.DC
     Decor.Gen
     Decor.Main
     Decor.Types
+    Decor.Types.DC
   build-depends:
     base >= 4.9 && < 5,
     bimap,
