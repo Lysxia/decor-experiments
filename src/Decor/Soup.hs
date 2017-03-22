@@ -17,6 +17,7 @@ import Control.Monad.State.Strict
 
 import Control.Comonad.Cofree
 
+import Data.Foldable
 import Data.Monoid
 
 import Generics.OneLiner
@@ -237,54 +238,46 @@ initK = do
   return
     ([KType emptyCtx t ty], t, ty)
 
--- Names that can't possibly be confused with local variables.
-m_T0, m_Ty0 :: DCId
-m_S0 :: S
-
-ExceptT [Right ((m_T0, m_Ty0), m_S0)] =
-  ((`runStateT` s) . unM)
-    (initK >>= \(ks, t, ty) -> andK ks >> return (t, ty))
-  where s = S 0 []
-
 --
 
-data S = S
+data S h = S
   { counter :: !Integer
-  , constraints :: [K]
+  , constraints :: h
   } deriving Show
 
 type ForkF = ExceptT () []
 
-newtype M a = M { unM :: StateT S ForkF a }
+newtype M h a = M { unM :: StateT (S h) ForkF a }
   deriving (Functor, Applicative, Monad)
 
-instance Fresh M Integer where
+instance Fresh (M h) Integer where
   fresh = M . state $ \s ->
     let i = counter s in (i, s {counter = i+1})
 
-instance MonadSoup M where
+instance MonadSoup (M h) where
   pick = M . lift . lift
 
-runM :: M [K] -> S -> ForkF S
-runM = execStateT . unM . (>>= andK)
+runM :: KStore h => M h [K] -> S h -> ForkF (S h)
+runM = execStateT . unM . (>>= andKs)
 
-andK :: [K] -> M ()
-andK ks = M . modify' $ \s -> s {constraints = ks ++ constraints s}
+class KStore h where
+  initStore :: h
+  andK :: K -> M h ()
+  extractKType :: (Ctx -> DCId -> DCId -> M h a) -> M h a
 
-extractKType :: (Ctx -> DCId -> DCId -> M a) -> M a
-extractKType k = M $ do
-  s <- get
-  case break isKType (constraints s) of
-    (cs, KType ctx t ty : cs') -> do
-      put (s { constraints = cs ++ cs' })
-      unM (k ctx t ty)
-    _ -> (lift . lift) []
+andKs :: KStore h => [K] -> M h ()
+andKs = traverse_ andK
+
+generate :: KStore h => (Cofree ForkF (S h), (DCId, DCId))
+generate = (coiter (runM (extractKType typeCheck)) s0, tt0)
   where
-    isKType (KType{}) = True
-    isKType _ = False
+    ExceptT [Right (tt0, s0)] =
+      ((`runStateT` s) . unM)
+        (initK >>= \(ks, t, ty) -> andKs ks >> return (t, ty))
+    s = S 0 initStore
 
-tree :: Cofree ForkF S
-tree = coiter (runM (extractKType typeCheck)) m_S0
+tree :: KStore h => Cofree ForkF (S h)
+tree = fst generate
 
 data Elide f a = X | Y (f a)
   deriving (Eq, Ord, Show, Foldable, Functor)
@@ -295,7 +288,23 @@ takeDepth n (a :< f) = a :< takeDepth' n f
     takeDepth' 0 _ = X
     takeDepth' n f = Y (fmap (takeDepth (n - 1)) f)
 
-tree' :: Cofree (Elide ForkF) S
+type HSimple = [K]
+
+instance KStore [K] where
+  initStore = []
+  andK k = M . modify' $ \s -> s {constraints = k : constraints s}
+  extractKType k = M $ do
+    s <- get
+    case break isKType (constraints s) of
+      (cs, KType ctx t ty : cs') -> do
+        put (s { constraints = cs ++ cs' })
+        unM (k ctx t ty)
+      _ -> (lift . lift) []
+    where
+      isKType (KType{}) = True
+      isKType _ = False
+
+tree' :: Cofree (Elide ForkF) (S HSimple)
 tree' = takeDepth 2 tree
 
 size :: Foldable f => Cofree f a -> Integer
