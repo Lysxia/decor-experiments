@@ -98,25 +98,27 @@ freshes
 freshes = createA' (For :: For (Fresh m)) fresh
 
 data Ctx = Ctx
-  deriving (Eq, Ord, Show)
+  { varCtx :: [(VarId, DCId)]
+  , cVarCtx :: [(CVarId, EqProp DCId)]
+  } deriving (Eq, Ord, Show)
 
 emptyCtx :: Ctx
-emptyCtx = Ctx
+emptyCtx = Ctx [] []
 
-data Ctx' = Ctx'
+data Ctx' = Ctx' [CVarId]
   deriving (Eq, Ord, Show)
 
 cctx :: Ctx -> Ctx'
-cctx = undefined
+cctx ctx = Ctx' [c | (c, _) <- cVarCtx ctx]
 
 pickVar :: MonadSoup m => Ctx -> m (VarId, DCId)
-pickVar = undefined
+pickVar ctx = pick (varCtx ctx)
 
 insertVar :: VarId -> DCId -> Ctx -> Ctx
-insertVar = undefined
+insertVar x ty ctx = ctx { varCtx = (x, ty) : varCtx ctx }
 
 insertCVar :: CVarId -> EqProp DCId -> Ctx -> Ctx
-insertCVar = undefined
+insertCVar c phi ctx = ctx { cVarCtx = (c, phi) : cVarCtx ctx }
 
 alternate3 :: MonadSoup m => [a -> b -> c -> m d] -> a -> b -> c -> m d
 alternate3 fs a b c = pick fs >>= \f -> f a b c
