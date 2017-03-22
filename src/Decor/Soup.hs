@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
@@ -15,6 +16,8 @@ import Control.Monad.Except
 import Control.Monad.State.Strict
 
 import Control.Comonad.Cofree
+
+import Data.Monoid
 
 import Generics.OneLiner
 import GHC.Generics (Generic)
@@ -284,7 +287,7 @@ tree :: Cofree ForkF S
 tree = coiter (runM (extractKType typeCheck)) m_S0
 
 data Elide f a = X | Y (f a)
-  deriving (Eq, Ord, Show, Functor)
+  deriving (Eq, Ord, Show, Foldable, Functor)
 
 takeDepth :: Int -> Cofree ForkF a -> Cofree (Elide ForkF) a
 takeDepth n (a :< f) = a :< takeDepth' n f
@@ -294,3 +297,7 @@ takeDepth n (a :< f) = a :< takeDepth' n f
 
 tree' :: Cofree (Elide ForkF) S
 tree' = takeDepth 2 tree
+
+size :: Foldable f => Cofree f a -> Integer
+size = getSum . size'
+  where size' (_ :< f) = 1 + foldMap size' f
