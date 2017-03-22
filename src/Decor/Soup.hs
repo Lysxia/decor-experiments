@@ -1,6 +1,8 @@
+{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE RankNTypes #-}
@@ -9,6 +11,10 @@
 
 module Decor.Soup where
 
+import Control.Monad.Except
+import Control.Monad.State.Strict
+
+import Control.Comonad.Cofree
 
 import Generics.OneLiner
 import GHC.Generics (Generic)
@@ -225,3 +231,64 @@ initK = do
   (t, ty) <- freshes
   return
     ([KType emptyCtx t ty], t, ty)
+
+-- Names that can't possibly be confused with local variables.
+m_T0, m_Ty0 :: DCId
+m_S0 :: S
+
+ExceptT [Right ((m_T0, m_Ty0), m_S0)] =
+  ((`runStateT` s) . unM)
+    (initK >>= \(ks, t, ty) -> andK ks >> return (t, ty))
+  where s = S 0 []
+
+--
+
+data S = S
+  { counter :: !Integer
+  , constraints :: [K]
+  } deriving Show
+
+type ForkF = ExceptT () []
+
+newtype M a = M { unM :: StateT S ForkF a }
+  deriving (Functor, Applicative, Monad)
+
+instance Fresh M Integer where
+  fresh = M . state $ \s ->
+    let i = counter s in (i, s {counter = i+1})
+
+instance MonadSoup M where
+  pick = M . lift . lift
+
+runM :: M [K] -> S -> ForkF S
+runM = execStateT . unM . (>>= andK)
+
+andK :: [K] -> M ()
+andK ks = M . modify' $ \s -> s {constraints = ks ++ constraints s}
+
+extractKType :: (Ctx -> DCId -> DCId -> M a) -> M a
+extractKType k = M $ do
+  s <- get
+  case break isKType (constraints s) of
+    (cs, KType ctx t ty : cs') -> do
+      put (s { constraints = cs ++ cs' })
+      unM (k ctx t ty)
+    _ -> (lift . lift) []
+  where
+    isKType (KType{}) = True
+    isKType _ = False
+
+tree :: Cofree ForkF S
+tree = coiter (runM (extractKType typeCheck)) m_S0
+
+data Elide f a = X | Y (f a)
+  deriving (Eq, Ord, Show, Functor)
+
+takeDepth :: Int -> Cofree ForkF a -> Cofree (Elide ForkF) a
+takeDepth n (a :< f) = a :< takeDepth' n f
+  where
+    takeDepth' 0 _ = X
+    takeDepth' n f = Y (fmap (takeDepth (n - 1)) f)
+
+tree' :: Cofree (Elide ForkF) S
+tree' = takeDepth 2 tree

@@ -24,8 +24,10 @@ library
   build-depends:
     base >= 4.9 && < 5,
     bimap,
+    free,
     one-liner,
     containers,
+    mtl,
     transformers,
     QuickCheck,
     QuickCheck-GenT
