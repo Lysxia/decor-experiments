@@ -1,27 +1,42 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module Decor.Soup where
 
+import Control.Applicative
 import Control.Monad.Except
 import Control.Monad.State.Strict
+import Control.Monad.Writer
 
 import Control.Comonad.Cofree
 
 import Data.Foldable
-import Data.Monoid
+
+import Data.Map (Map)
+import qualified Data.Map as Map
+
+import Data.Bimap (Bimap)
+import qualified Data.Bimap as Bimap
+
+import Lens.Micro.Platform
 
 import Generics.OneLiner
 import GHC.Generics (Generic)
+import GHC.TypeLits
 
 import Decor.Types
 
@@ -45,7 +60,7 @@ newtype CoercionId = CoercionId Integer
 -- | Constraints.
 data K where
   KEqDC :: DCId -> RHS -> K
-  -- ^ @t = u@. Term equality.
+  -- ^ @t = u[sub]@. Term equality.
 
   KType :: Ctx -> DCId -> DCId -> K
   -- ^ @G |- t : u@. Typing judgement.
@@ -65,7 +80,75 @@ data K where
   K_ :: K -> K
   -- ^ Redundant constraints.
 
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Show)
+
+kEqDC :: DCId -> RHS -> K
+kEqDC = KEqDC
+
+data Sub = Sub
+  { vSub :: Bimap VarId VarId
+  , cSub :: Bimap CVarId CVarId
+  } deriving (Eq, Show)
+
+emptySub :: Sub
+emptySub = Sub Bimap.empty Bimap.empty
+
+isEmptySub :: Sub -> Bool
+isEmptySub = (== emptySub)
+
+subV :: VarId -> Sub -> Maybe VarId
+subV v = Bimap.lookup v . vSub
+
+insertSub :: VarId -> VarId -> Sub -> Sub
+insertSub v1 v2 sub = sub { vSub = Bimap.insert v1 v2 (vSub sub) }
+
+invSub :: Sub -> Sub
+invSub (Sub vs cs) = Sub (Bimap.twist vs) (Bimap.twist cs)
+
+composeBimap :: (Ord b, Ord c) => Bimap a b -> Bimap b c -> Bimap a c
+composeBimap ma mb = Bimap.mapR (mb Bimap.!) ma
+
+composeSub :: Sub -> Sub -> Sub
+composeSub (Sub vs cs) (Sub vs' cs') =
+  Sub (composeBimap vs vs') (composeBimap cs cs')
+
+newtype UnionFind a = UnionFind { unUF :: Map a (Either Int a) }
+  deriving Show
+
+emptyUF :: UnionFind a
+emptyUF = UnionFind Map.empty
+
+rootUF :: Ord a => a -> UnionFind a -> a
+rootUF a uf = rootUF' a uf $ \a' _ _ -> a'
+
+rootUF'
+  :: Ord a
+  => a -> UnionFind a -> (a -> Int -> (a -> UnionFind a -> UnionFind a) -> r) -> r
+rootUF' a uf k =
+  case Map.lookup a (unUF uf) of
+    Nothing -> k a 1 h
+    Just (Left n) -> k a n h
+    Just (Right a') -> rootUF' a' uf $ \a0 n0 k0 -> k a0 n0 $ \a' -> k0 a' . h a'
+  where
+    h a' = UnionFind . Map.insert a (Right a') . unUF
+
+mergeUF :: Ord a => a -> a -> UnionFind a -> UnionFind a
+mergeUF a b = snd . mergeUF' a b
+
+mergeUF' :: Ord a => a -> a -> UnionFind a -> (a, UnionFind a)
+mergeUF' a b uf =
+  rootUF' a uf $ \a' n updateA ->
+    rootUF' b uf $ \b' m updateB ->
+      let
+        merge c =
+          (,) c . UnionFind . Map.insert c (Left (n + m)) . unUF . updateA c . updateB c
+      in
+        merge (if n > m then a' else b') uf
+
+equalUF :: Ord a => a -> a -> UnionFind a -> Bool
+equalUF a b uf =
+  rootUF' a uf $ \a _ _ -> rootUF' b uf $ \b _ _ ->
+    a == b
 
 data RHS
   = RHSId DCId
@@ -142,15 +225,15 @@ tcStar, tcVar, tcPi, tcAbs, tcApp, tcConv, tcCoPi,
 
 tcStar _ctx t tyT = do
   return
-    [ KEqDC t (RHSHead Star)
-    , KEqDC tyT (RHSHead Star)
+    [ kEqDC t (RHSHead Star)
+    , kEqDC tyT (RHSHead Star)
     ]
 
 tcVar ctx t tyT = do
   (x, ty) <- pickVar ctx
   return
-    [ KEqDC t (RHSHead (Var x))
-    , KEqDC tyT (RHSId ty)
+    [ kEqDC t (RHSHead (Var x))
+    , kEqDC tyT (RHSId ty)
     ]
 
 tcPi ctx t tyStar = do
@@ -158,8 +241,8 @@ tcPi ctx t tyStar = do
   (x, tyA, tyB) <- freshes
   let ctx' = insertVar x tyA ctx
   return
-    [ KEqDC t (RHSHead (Pi rel x tyA tyB))
-    , KEqDC tyStar (RHSHead Star)
+    [ kEqDC t (RHSHead (Pi rel x tyA tyB))
+    , kEqDC tyStar (RHSHead Star)
     , KType ctx' tyB tyStar
     , KWF ctx'
     , K_ (KType ctx tyA tyStar)
@@ -170,12 +253,12 @@ tcAbs ctx t tyT = do
   (x, tyA, b, tyB, tyStar) <- freshes
   let ctx' = insertVar x tyA ctx
   return
-    [ KEqDC t (RHSHead (Abs rel x tyA b))
-    , KEqDC tyT (RHSHead (Pi rel x tyA tyB))
+    [ kEqDC t (RHSHead (Abs rel x tyA b))
+    , kEqDC tyT (RHSHead (Pi rel x tyA tyB))
     , KType ctx' b tyB
     , KWF ctx'
     , KRel rel x b
-    , K_ (KEqDC tyStar (RHSHead Star))
+    , K_ (kEqDC tyStar (RHSHead Star))
     , K_ (KType ctx tyA tyStar)
     ]
 
@@ -183,9 +266,9 @@ tcApp ctx t tyT = do
   rel <- pick [Rel, Irr]
   (b, a, x, tyA, ty', tyB) <- freshes
   return
-    [ KEqDC t   (RHSHead (App b a rel))
-    , KEqDC tyB (RHSHead (Pi rel x tyA ty'))
-    , KEqDC tyT (RHSSub x a ty')
+    [ kEqDC t   (RHSHead (App b a rel))
+    , kEqDC tyB (RHSHead (Pi rel x tyA ty'))
+    , kEqDC tyT (RHSSub x a ty')
     , KType ctx b tyB
     , KType ctx a tyA
     ]
@@ -193,8 +276,8 @@ tcApp ctx t tyT = do
 tcConv ctx t tyB = do
   (a, g, tyA, tyStar) <- freshes
   return
-    [ KEqDC t (RHSHead (Coerce a g))
-    , KEqDC tyStar (RHSHead Star)
+    [ kEqDC t (RHSHead (Coerce a g))
+    , kEqDC tyStar (RHSHead Star)
     , KType ctx tyB tyStar
     , KType ctx a tyA
     , KTypeC ctx (cctx ctx) g (tyA :~: tyB)
@@ -204,8 +287,8 @@ tcCoPi ctx t tyStar = do
   (c, phi, tyB) <- freshes
   let ctx' = insertCVar c phi ctx
   return
-    [ KEqDC t (RHSHead (CoPi c phi tyB))
-    , KEqDC tyStar (RHSHead Star)
+    [ kEqDC t (RHSHead (CoPi c phi tyB))
+    , kEqDC tyStar (RHSHead Star)
     , KType ctx' tyB tyStar
     , KWF ctx'
     , K_ (KOK ctx phi)
@@ -215,8 +298,8 @@ tcCoAbs ctx t tyT = do
   (c, phi, b, tyB) <- freshes
   let ctx' = insertCVar c phi ctx
   return
-    [ KEqDC t   (RHSHead (CoAbs c phi b))
-    , KEqDC tyT (RHSHead (CoPi c phi tyB))
+    [ kEqDC t   (RHSHead (CoAbs c phi b))
+    , kEqDC tyT (RHSHead (CoPi c phi tyB))
     , KType ctx' b tyB
     , KWF ctx'
     , K_ (KOK ctx phi)
@@ -225,9 +308,9 @@ tcCoAbs ctx t tyT = do
 tcCoApp ctx t tyT = do
   (a, g, c, phi, tyB, ty') <- freshes
   return
-    [ KEqDC t   (RHSHead (CoApp a g))
-    , KEqDC tyT (RHSSubC c g tyB)
-    , KEqDC ty' (RHSHead (CoPi c phi tyB))
+    [ kEqDC t   (RHSHead (CoApp a g))
+    , kEqDC tyT (RHSSubC c g tyB)
+    , kEqDC ty' (RHSHead (CoPi c phi tyB))
     , KType ctx a ty'
     , KTypeC ctx (cctx ctx) g phi
     ]
@@ -247,8 +330,10 @@ data S h = S
 
 type ForkF = ExceptT () []
 
-newtype M h a = M { unM :: StateT (S h) ForkF a }
+newtype M h a = M { unM :: M' h a }
   deriving (Functor, Applicative, Monad)
+
+type M' h = StateT (S h) ForkF
 
 instance Fresh (M h) Integer where
   fresh = M . state $ \s ->
@@ -263,17 +348,19 @@ runM = execStateT . unM . (>>= andKs)
 class KStore h where
   initStore :: h
   andK :: K -> M h ()
+  reduce :: M h ()
   extractKType :: (Ctx -> DCId -> DCId -> M h a) -> M h a
 
-andKs :: KStore h => [K] -> M h ()
-andKs = traverse_ andK
+  andKs :: KStore h => [K] -> M h ()
+  andKs = traverse_ andK
+
 
 generate :: KStore h => (Cofree ForkF (S h), (DCId, DCId))
 generate = (coiter (runM (extractKType typeCheck)) s0, tt0)
   where
     ExceptT [Right (tt0, s0)] =
       ((`runStateT` s) . unM)
-        (initK >>= \(ks, t, ty) -> andKs ks >> return (t, ty))
+        (initK >>= \(ks, t, ty) -> andKs ks >> reduce >> return (t, ty))
     s = S 0 initStore
 
 tree :: KStore h => Cofree ForkF (S h)
@@ -293,16 +380,154 @@ type HSimple = [K]
 instance KStore [K] where
   initStore = []
   andK k = M . modify' $ \s -> s {constraints = k : constraints s}
-  extractKType k = M $ do
+  reduce = return ()
+  extractKType r = M $ do
     s <- get
     case break isKType (constraints s) of
       (cs, KType ctx t ty : cs') -> do
         put (s { constraints = cs ++ cs' })
-        unM (k ctx t ty)
+        unM (r ctx t ty)
       _ -> (lift . lift) []
-    where
-      isKType (KType{}) = True
-      isKType _ = False
+
+isKType :: K -> Bool
+isKType (KType{}) = True
+isKType _ = False
+
+data H1 = H1
+  { eqns :: Map DCId Alias
+  , ks1 :: [K]
+  , vUF :: UnionFind VarId
+  , cUF :: UnionFind CVarId
+  } deriving Show
+
+mergeH1Var :: VarId -> VarId -> M' H1 ()
+mergeH1Var v1 v2 =
+  l @"ks" . l @"vUF" %= mergeUF v1 v2
+
+equalH1Var :: VarId -> VarId -> M' H1 Bool
+equalH1Var v1 v2 = do
+  s <- get
+  return (equalUF v1 v2 (s ^. l @"ks" . l @"vUF"))
+
+data Alias
+  = Alias DCId
+  | Head (DCore_ Soup)
+  deriving (Eq, Show)
+
+ksH1 :: Lens' (S H1) [K]
+ksH1 = l @"ks" . l @"ks"
+
+eqnsH1 :: Lens' (S H1) (Map DCId Alias)
+eqnsH1 = l @"ks" . l @"eqns"
+
+instance KStore H1 where
+  initStore = H1 Map.empty [] emptyUF emptyUF
+  andK k = M $ ksH1 %= (k :)
+  reduce = reduceH1
+  extractKType r = M $ do
+    s <- get
+    (go, ks) <- (lift . lift)
+      [ (r ctx t ty, ks)
+      | (KType ctx t ty, ks) <- focus (s ^. ksH1) ]
+    ksH1 .= ks
+    unM go
+
+reduceH1 :: M H1 ()
+reduceH1 = M $ do
+  s <- get
+  reduceH1' (s ^. ksH1)
+
+reduceH1' :: [K] -> M' H1 ()
+reduceH1' ks = do
+  ks <- traverseCollectRetry reduceH1Atom ks
+  ksH1 .= ks
+
+type RetryFlag = Bool
+
+type CollectRetryCont a = [K] -> RetryFlag -> M' H1 a
+type CollectRetry =
+  forall a. CollectRetryCont a -> K -> M' H1 a
+
+traverseCollectRetry
+  :: CollectRetry
+  -> [K]
+  -> M' H1 [K]
+traverseCollectRetry = traverseCollectRetry' []
+
+traverseCollectRetry' :: [K] -> CollectRetry -> [K] -> M' H1 [K]
+traverseCollectRetry' acc _collect [] = return acc
+traverseCollectRetry' acc collect (k : ks) =
+  (`collect` k) $ \moreKs retryFlag ->
+    if retryFlag then
+      traverseCollectRetry collect (moreKs ++ acc ++ ks)
+    else
+      traverseCollectRetry' (moreKs ++ acc) collect ks
+
+reduceH1Atom :: CollectRetry
+reduceH1Atom ret (KEqDC t rhs) = reduceH1EqDC emptySub t rhs >> ret [] False
+
+reduceH1EqDC :: Sub -> DCId -> RHS -> M' H1 ()
+reduceH1EqDC sub t (RHSId u) = reduceH1EqDCId sub t u
+
+reduceH1EqDCId :: Sub -> DCId -> DCId -> M' H1 ()
+reduceH1EqDCId sub t u = do
+  t_ <- lookupH1V t
+  u_ <- lookupH1V u
+  case (t_, u_) of
+    (Left t, Left u) | t == u -> return ()
+    (Left t, Right _) ->
+      eqnsH1 %= Map.insert t (Alias u)
+    (Right _, Left u) ->
+      eqnsH1 %= Map.insert u (Alias t)
+    (Right (t, e), Right (u, f)) -> do
+      reduceH1EqHead sub e f
+      eqnsH1 %= Map.insert u (Alias t)
+
+lookupH1V :: DCId -> M' H1 (Either DCId (DCId, DCore_ Soup))
+lookupH1V t = do
+  s <- get
+  case Map.lookup t (s ^. eqnsH1) of
+    Just (Alias v) -> lookupH1V v
+    Nothing -> return (Left t)
+    Just (Head e) -> return (Right (t, e))
+
+reduceH1EqHead
+  :: Sub -> DCore_ Soup -> DCore_ Soup -> M' H1 ()
+reduceH1EqHead sub e1 e2 = case (e1, e2) of
+  (Star, Star) -> return ()
+  (Star, _) -> empty
+
+  (Var v1, Var v2)
+    | Just v1 == subV v2 sub || v1 == v2 ->
+        return ()
+  (Var{}, _) -> empty
+
+  (Abs rel1 v1 tyA1 b1, Abs rel2 v2 tyA2 b2)
+    | rel1 == rel2 -> do
+        let sub' = insertSub v1 v2 sub
+        reduceH1EqDCId sub tyA1 tyA2
+        reduceH1EqDCId sub' b1 b2
+  (Abs{}, _) -> empty
+
+  (Pi rel1 v1 tyA1 tyB1, Pi rel2 v2 tyA2 tyB2)
+    | rel1 == rel2 -> do
+        let sub' = insertSub v1 v2 sub
+        reduceH1EqDCId sub tyA1 tyA2
+        reduceH1EqDCId sub' tyB1 tyB2
+  (Pi{}, _) -> empty
+
+  (App b1 a1 rel1, App b2 a2 rel2)
+    | rel1 == rel2 -> do
+        reduceH1EqDCId sub b1 b2
+        reduceH1EqDCId sub a1 a2
+
+  (App{}, _) -> empty
+
+focus :: [a] -> [(a, [a])]
+focus = focus' []
+  where
+    focus' _ [] = []
+    focus' aux (a : as) = (a, aux) : focus' (a : aux) as
 
 tree' :: Cofree (Elide ForkF) (S HSimple)
 tree' = takeDepth 2 tree
@@ -310,3 +535,18 @@ tree' = takeDepth 2 tree
 size :: Foldable f => Cofree f a -> Integer
 size = getSum . size'
   where size' (_ :< f) = 1 + foldMap size' f
+
+class L (n :: Symbol) s a | n s -> a where
+  l :: Lens' s a
+
+instance L "ks" (S h) h where
+  l f s = fmap (\h -> s { constraints = h }) (f (constraints s))
+
+instance L "ks" H1 [K] where
+  l f h = fmap (\ks -> h { ks1 = ks }) (f (ks1 h))
+
+instance L "eqns" H1 (Map DCId Alias) where
+  l f h = fmap (\eqns -> h { eqns = eqns }) (f (eqns h))
+
+instance L "vUF" H1 (UnionFind VarId) where
+  l f h = fmap (\vUF -> h { vUF = vUF }) (f (vUF h))

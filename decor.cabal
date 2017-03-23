@@ -27,6 +27,7 @@ library
     free,
     one-liner,
     containers,
+    microlens-platform,
     mtl,
     transformers,
     QuickCheck,
