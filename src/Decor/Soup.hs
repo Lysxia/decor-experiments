@@ -465,10 +465,17 @@ traverseCollectRetry' acc collect (k : ks) =
       traverseCollectRetry' (moreKs ++ acc) collect ks
 
 reduceH1Atom :: CollectRetry
-reduceH1Atom ret (KEqDC t rhs) = reduceH1EqDC t rhs >> ret [] False
+reduceH1Atom ret (KEqDC t (RHSId u)) = reduceH1EqDCId t u >> ret [] False
+reduceH1Atom ret (KEqDC t (RHSHead f)) = reduceH1EqHead t f >> ret [] False
+reduceH1Atom ret (KEqDC t (RHSSub x tyA tyB)) =
+  undefined -- reduceH1EqSub ret t x tyA tyB
 
-reduceH1EqDC :: DCId -> RHS -> M' H1 ()
-reduceH1EqDC t (RHSId u) = reduceH1EqDCId t u
+reduceH1EqHead :: DCId -> DCore_ Soup -> M' H1 ()
+reduceH1EqHead t f = do
+  t_ <- lookupH1V t
+  case t_ of
+    Left t -> eqHead t f
+    Right (_, e) -> reduceH1EqHeads' e f
 
 reduceH1EqDCId :: DCId -> DCId -> M' H1 ()
 reduceH1EqDCId t u = do
@@ -476,19 +483,17 @@ reduceH1EqDCId t u = do
   u_ <- lookupH1V u
   case (t_, u_) of
     (Left t, Left u) | t == u -> return ()
-    (Left t, Right (u, f)) ->
-      alias t u f
-    (Right (t, e), Left u) ->
-      alias u t e
-    (Right (t, e), Right (u, f)) | t == u -> return ()
-    (Right (t, e), Right (u, f)) -> do
-      reduceH1EqHead e f
-      unsafeAlias u t
+    (Left t, Left u) -> alias t u
+    (Left t, Right (_, f)) -> eqHead t f
+    (Right (_, e), Left u) -> eqHead u e
+    (Right (t, _), Right (u, _)) | t == u -> return ()
+    (Right (_, e), Right (_, f)) ->
+      reduceH1EqHeads' e f
 
-alias :: DCId -> DCId -> DCore_ Soup -> M' H1 ()
-alias t u e = do
+eqHead :: DCId -> DCore_ Soup -> M' H1 ()
+eqHead t e = do
   occursCheck' t e
-  unsafeAlias t u
+  eqnsH1 %= Map.insert t (Head e)
 
 occursCheck' :: DCId -> DCore_ Soup -> M' H1 ()
 occursCheck' t e = case e of
@@ -507,8 +512,8 @@ occursCheck t u = do
       when (t == u) empty
       occursCheck' t f
 
-unsafeAlias :: DCId -> DCId -> M' H1 ()
-unsafeAlias t u = eqnsH1 %= Map.insert t (Alias u)
+alias :: DCId -> DCId -> M' H1 ()
+alias t u = eqnsH1 %= Map.insert t (Alias u)
 
 lookupH1V :: DCId -> M' H1 (Either DCId (DCId, DCore_ Soup))
 lookupH1V t = do
@@ -518,9 +523,9 @@ lookupH1V t = do
     Nothing -> return (Left t)
     Just (Head e) -> return (Right (t, e))
 
-reduceH1EqHead
+reduceH1EqHeads'
   :: DCore_ Soup -> DCore_ Soup -> M' H1 ()
-reduceH1EqHead e1 e2 = case (e1, e2) of
+reduceH1EqHeads' e1 e2 = case (e1, e2) of
   (Star, Star) -> return ()
   (Star, _) -> empty
 
