@@ -18,6 +18,7 @@
 module Decor.Soup where
 
 import Control.Applicative
+import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State.Strict
 import Control.Monad.Writer
@@ -464,24 +465,50 @@ traverseCollectRetry' acc collect (k : ks) =
       traverseCollectRetry' (moreKs ++ acc) collect ks
 
 reduceH1Atom :: CollectRetry
-reduceH1Atom ret (KEqDC t rhs) = reduceH1EqDC emptySub t rhs >> ret [] False
+reduceH1Atom ret (KEqDC t rhs) = reduceH1EqDC t rhs >> ret [] False
 
-reduceH1EqDC :: Sub -> DCId -> RHS -> M' H1 ()
-reduceH1EqDC sub t (RHSId u) = reduceH1EqDCId sub t u
+reduceH1EqDC :: DCId -> RHS -> M' H1 ()
+reduceH1EqDC t (RHSId u) = reduceH1EqDCId t u
 
-reduceH1EqDCId :: Sub -> DCId -> DCId -> M' H1 ()
-reduceH1EqDCId sub t u = do
+reduceH1EqDCId :: DCId -> DCId -> M' H1 ()
+reduceH1EqDCId t u = do
   t_ <- lookupH1V t
   u_ <- lookupH1V u
   case (t_, u_) of
     (Left t, Left u) | t == u -> return ()
-    (Left t, Right _) ->
-      eqnsH1 %= Map.insert t (Alias u)
-    (Right _, Left u) ->
-      eqnsH1 %= Map.insert u (Alias t)
+    (Left t, Right (u, f)) ->
+      alias t u f
+    (Right (t, e), Left u) ->
+      alias u t e
+    (Right (t, e), Right (u, f)) | t == u -> return ()
     (Right (t, e), Right (u, f)) -> do
-      reduceH1EqHead sub e f
-      eqnsH1 %= Map.insert u (Alias t)
+      reduceH1EqHead e f
+      unsafeAlias u t
+
+alias :: DCId -> DCId -> DCore_ Soup -> M' H1 ()
+alias t u e = do
+  occursCheck' t e
+  unsafeAlias t u
+
+occursCheck' :: DCId -> DCore_ Soup -> M' H1 ()
+occursCheck' t e = case e of
+  Star -> return ()
+  Var _ -> return ()
+  Abs _ _ tyA b -> mapM_ (occursCheck t) [tyA, b]
+  Pi _ _ tyA tyB -> mapM_ (occursCheck t) [tyA, tyB]
+  App b a _ -> mapM_ (occursCheck t) [b, a]
+
+occursCheck :: DCId -> DCId -> M' H1 ()
+occursCheck t u = do
+  u_ <- lookupH1V u
+  case u_ of
+    Left u -> when (t == u) empty
+    Right (u, f) -> do
+      when (t == u) empty
+      occursCheck' t f
+
+unsafeAlias :: DCId -> DCId -> M' H1 ()
+unsafeAlias t u = eqnsH1 %= Map.insert t (Alias u)
 
 lookupH1V :: DCId -> M' H1 (Either DCId (DCId, DCore_ Soup))
 lookupH1V t = do
@@ -492,34 +519,37 @@ lookupH1V t = do
     Just (Head e) -> return (Right (t, e))
 
 reduceH1EqHead
-  :: Sub -> DCore_ Soup -> DCore_ Soup -> M' H1 ()
-reduceH1EqHead sub e1 e2 = case (e1, e2) of
+  :: DCore_ Soup -> DCore_ Soup -> M' H1 ()
+reduceH1EqHead e1 e2 = case (e1, e2) of
   (Star, Star) -> return ()
   (Star, _) -> empty
 
-  (Var v1, Var v2)
-    | Just v1 == subV v2 sub || v1 == v2 ->
-        return ()
+  (Var v1, Var v2) -> do
+        eq <- equalH1Var v1 v2
+        if eq then
+          return ()
+        else
+          empty
   (Var{}, _) -> empty
 
   (Abs rel1 v1 tyA1 b1, Abs rel2 v2 tyA2 b2)
     | rel1 == rel2 -> do
-        let sub' = insertSub v1 v2 sub
-        reduceH1EqDCId sub tyA1 tyA2
-        reduceH1EqDCId sub' b1 b2
+        mergeH1Var v1 v2
+        reduceH1EqDCId tyA1 tyA2
+        reduceH1EqDCId b1 b2
   (Abs{}, _) -> empty
 
   (Pi rel1 v1 tyA1 tyB1, Pi rel2 v2 tyA2 tyB2)
     | rel1 == rel2 -> do
-        let sub' = insertSub v1 v2 sub
-        reduceH1EqDCId sub tyA1 tyA2
-        reduceH1EqDCId sub' tyB1 tyB2
+        mergeH1Var v1 v2
+        reduceH1EqDCId tyA1 tyA2
+        reduceH1EqDCId tyB1 tyB2
   (Pi{}, _) -> empty
 
   (App b1 a1 rel1, App b2 a2 rel2)
     | rel1 == rel2 -> do
-        reduceH1EqDCId sub b1 b2
-        reduceH1EqDCId sub a1 a2
+        reduceH1EqDCId b1 b2
+        reduceH1EqDCId a1 a2
 
   (App{}, _) -> empty
 
