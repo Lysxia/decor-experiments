@@ -19,8 +19,11 @@ library
     Decor.Gen
     Decor.Main
     Decor.Soup
+    Decor.Soup.Simple
+    Decor.Soup.Trivial
     Decor.Types
     Decor.Types.DC
+    Decor.UnionFind
   build-depends:
     base >= 4.9 && < 5,
     bimap,
