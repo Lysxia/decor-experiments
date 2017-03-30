@@ -313,6 +313,21 @@ type ForkF = ExceptT () []
 newtype M h a = M { unM :: M' h a }
   deriving (Functor, Applicative, Monad, MonadState (S h))
 
+newtype Skip (t :: (* -> *) -> * -> *) (m :: * -> *) a
+  = Skip { unSkip :: t m a }
+  deriving (Functor, Applicative, Monad)
+
+instance MonadPlus m => Alternative (Skip (ExceptT e) m) where
+  empty = Skip (ExceptT empty)
+  Skip (ExceptT a) <|> Skip (ExceptT b) = Skip (ExceptT (a <|> b))
+
+instance MonadPlus m => MonadPlus (Skip (ExceptT e) m)
+
+instance Alternative (M h) where
+  empty = (M . mapStateT unSkip . lift) empty
+  M a <|> M b = (M . mapStateT unSkip)
+    (mapStateT Skip a <|> mapStateT Skip b)
+
 type M' h = StateT (S h) ForkF
 
 instance MonadFresh (M h) where
