@@ -174,10 +174,12 @@ reduceAtomH1 k@(K1Sub u v w n') = do
       (h', ks) <- lift $ refresh h (-1) n' $ \v v' _ n' -> K1Sub v' v w n'
       return (k1EqDC u h' : ks)
     Nothing -> case Map.lookup u eqns of
-      Just h -> (lift . lift . lift)
-        [ [k1EqDC v (Var n')]
-       -- , [k]
-        ]
+      Just h -> do
+        let left = return (Var n', [])
+            right = lift $ refresh h 0 0 $ \v v' _ n' -> K1Sub v v' w n'
+        (h', ks) <- left <|> right
+        eqnsH1 %= Map.insert v h'
+        return ks
       Nothing -> return [k]
 reduceAtomH1 k = return [k]
 
