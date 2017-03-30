@@ -55,6 +55,9 @@ type instance Coercion Soup = CoercionId
 newtype DeBruijnV = DeBruijnV Integer
   deriving (Eq, Ord, Show, Num)
 
+shift :: DeBruijnV -> Shift -> DeBruijnV
+shift v s = v + DeBruijnV s
+
 asShift :: DeBruijnV -> Shift
 asShift (DeBruijnV i) = i
 
@@ -131,32 +134,35 @@ data RHS
   | RHSSubC CoercionId DCId
   deriving (Eq, Ord, Show)
 
-class (Monad m, Fresh m Integer) => MonadSoup m where
+class (Monad m, MonadFresh m) => MonadSoup m where
   pick :: [a] -> m a
 
-class Applicative m => Fresh m a where
-  fresh :: m a
+class Applicative m => MonadFresh m where
+  freshI :: m Integer
 
-instance (Applicative m, Fresh m Integer) => Fresh m VarId where
-  fresh = VarId <$> fresh
+class Fresh a where
+  fresh :: MonadFresh m => m a
 
-instance (Applicative m, Fresh m Integer) => Fresh m CVarId where
-  fresh = CVarId <$> fresh
+instance Fresh VarId where
+  fresh = VarId <$> freshI
 
-instance (Applicative m, Fresh m Integer) => Fresh m DCId where
-  fresh = DCId <$> fresh
+instance Fresh CVarId where
+  fresh = CVarId <$> freshI
 
-instance (Applicative m, Fresh m Integer) => Fresh m CoercionId where
-  fresh = CoercionId <$> fresh
+instance Fresh DCId where
+  fresh = DCId <$> freshI
 
-instance (Applicative m, Fresh m a) => Fresh m (EqProp a) where
+instance Fresh CoercionId where
+  fresh = CoercionId <$> freshI
+
+instance Fresh a => Fresh (EqProp a) where
   fresh = (:~:) <$> fresh <*> fresh
 
 freshes
   :: forall t m
-  .  (Generic t, ADTRecord t, Constraints t (Fresh m), Applicative m)
+  .  (Generic t, ADTRecord t, Constraints t Fresh, MonadFresh m)
   => m t
-freshes = createA' (For :: For (Fresh m)) fresh
+freshes = createA' (For :: For Fresh) fresh
 
 data Ctx = Ctx
   { varCtx :: [DCId]
@@ -305,12 +311,12 @@ data S h = S
 type ForkF = ExceptT () []
 
 newtype M h a = M { unM :: M' h a }
-  deriving (Functor, Applicative, Monad)
+  deriving (Functor, Applicative, Monad, MonadState (S h))
 
 type M' h = StateT (S h) ForkF
 
-instance Fresh (M h) Integer where
-  fresh = M . state $ \s ->
+instance MonadFresh (M h) where
+  freshI = state $ \s ->
     let i = counter s in (i, s {counter = i+1})
 
 instance MonadSoup (M h) where
