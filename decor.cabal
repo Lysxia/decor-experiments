@@ -30,6 +30,7 @@ library
     free,
     one-liner,
     containers,
+    kan-extensions,
     microlens-platform,
     mtl,
     transformers,

@@ -1,20 +1,68 @@
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeApplications #-}
 
 module Decor.Soup.Simple where
 
 import Control.Applicative
-import Control.Monad.State.Strict
-import Control.Monad.Writer.Strict
+import Control.Monad.Codensity
+import Control.Monad.Fail
+import Control.Monad.Free
+import Control.Monad.State.Strict hiding (fail)
+import Control.Monad.Writer.Strict hiding (fail)
 import Lens.Micro.Platform
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Typeable
+import Prelude hiding (fail)
 
 import Decor.Types
-import Decor.Soup
+import Decor.Soup hiding (M)
+
+data ChoiceF s a where
+  Tag :: s -> a -> ChoiceF s a
+  Inst :: [a] -> ChoiceF s a
+  Pick :: (Eq x, Show x, Typeable x) => [(x, a)] -> ChoiceF s a
+  Fail :: String -> ChoiceF s a
+
+deriving instance (Show s, Show a) => Show (ChoiceF s a)
+deriving instance Functor (ChoiceF s)
+
+pick :: (Eq x, Show x, Typeable x) => [x] -> (x -> a) -> ChoiceF s a
+pick xs f = Pick [(x, f x) | x <- xs]
+
+type MonadChoice m =
+  ( MonadFree (ChoiceF S1) m
+  , MonadState S1 m
+  , MonadFresh m
+  , MonadFail m
+  )
+
+tag :: MonadChoice m => m ()
+tag = get >>= \s -> wrap (Tag s (return ()))
+
+newtype M a = M { unM :: StateT S1 (Free (ChoiceF S1)) a }
+  deriving (Functor, Applicative, Monad, MonadState S1, MonadFree (ChoiceF S1))
+
+instance MonadFail M where
+  fail = wrap . Fail
+
+instance MonadFresh M where
+  freshI = do
+    s <- get
+    let i = counter s
+    put (s { counter = i + 1 })
+    return i
+
+type S1 = S H1
 
 type Alias = DCore_ Soup
 
@@ -51,10 +99,10 @@ ksH1 = l @"ks" . l @"ks"
 eqnsH1 :: Lens' (S H1) (Map DCId Alias)
 eqnsH1 = l @"ks" . l @"eqns"
 
-instance KStore H1 where
-  initStore = H1 Map.empty []
-  andK = andKH1 >=> \ks -> M $ ksH1 %= (ks ++)
-  reduce = reduceH1
+initS1 :: S1
+initS1 = S 0 (H1 Map.empty [])
+
+{-
   extractKType r = M $ do
     ks <- use ksH1
     (go, ks) <- (lift . lift)
@@ -62,8 +110,12 @@ instance KStore H1 where
       | (K1Type ctx t ty, ks) <- focus ks ]
     ksH1 .= ks
     unM go
+-}
 
-andKH1 :: K -> M H1 [K1]
+andK :: MonadChoice m => K -> m ()
+andK = andKH1 >=> \ks -> ksH1 %= (ks ++)
+
+andKH1 :: MonadChoice m => K -> m [K1]
 andKH1 (KEqDC t (RHSHead h)) = return [k1EqDC t h]
 andKH1 (KEqDC t (RHSId u n)) = return [k1EqId t u n 0]
 andKH1 (KEqDC t (RHSSub u v)) = return [K1Sub t u v 0]
@@ -78,17 +130,17 @@ andKH1 (KWF ctx) = return [K1WF ctx]
 --     Nothing -> eqnsH1 %= Map.insert t h >> return []
 --     Just h' -> eqHeadsH1 h h'
 
-eqHeadsH1 :: DCore_ Soup -> DCore_ Soup -> Shift -> DeBruijnV -> M' H1 [K1]
+eqHeadsH1 :: MonadChoice m => DCore_ Soup -> DCore_ Soup -> Shift -> DeBruijnV -> m [K1]
 eqHeadsH1 e1 e2 n m = case (e1, e2) of
 
   (Star, Star) -> return []
-  (Star, _) -> empty
+  (Star, _) -> fail "Star"
 
   (Var v1, Var v2)
-    | v2 >= m && shift v2 n < m -> empty
+    | v2 >= m && shift v2 n < m -> fail "Var, scope"
     | if v2 >= m then v1 == shift v2 n else v1 == v2 ->
         return []
-  (Var{}, _) -> empty
+  (Var{}, _) -> fail "Var"
 
   (Abs rel1 () tyA1 b1, Abs rel2 () tyA2 b2)
     | rel1 == rel2 ->
@@ -96,7 +148,7 @@ eqHeadsH1 e1 e2 n m = case (e1, e2) of
           [ k1EqId tyA1 tyA2 n  m
           , k1EqId b1   b2   n (m+1)
           ]
-  (Abs{}, _) -> empty
+  (Abs{}, _) -> fail "Abs"
 
   (Pi rel1 () tyA1 tyB1, Pi rel2 () tyA2 tyB2)
     | rel1 == rel2 ->
@@ -104,7 +156,7 @@ eqHeadsH1 e1 e2 n m = case (e1, e2) of
           [ k1EqId tyA1 tyA2 n  m
           , k1EqId tyB1 tyB2 n (m+1)
           ]
-  (Pi{}, _) -> empty
+  (Pi{}, _) -> fail "Pi"
 
   (App b1 a1 rel1, App b2 a2 rel2)
     | rel1 == rel2 ->
@@ -112,33 +164,34 @@ eqHeadsH1 e1 e2 n m = case (e1, e2) of
         [ k1EqId b1 b2 n m
         , k1EqId a1 a2 n m
         ]
-  (App{}, _) -> empty
+  (App{}, _) -> fail "App"
 
 refresh
-  :: DCore_ Soup -> Shift -> DeBruijnV
+  :: MonadChoice m
+  => DCore_ Soup -> Shift -> DeBruijnV
   -> (DCId -> DCId -> Shift -> DeBruijnV -> K1)
-  -> M' H1 (DCore_ Soup, [K1])
+  -> m (DCore_ Soup, [K1])
 refresh h 0 0 _ = return (h, [])
 refresh h n m k = case h of
   Star -> return (Star, [])
   Var v
-    | v >= m && shift v n < m -> empty
+    | v >= m && shift v n < m -> fail "Refresh Var, scope"
     | v >= m -> return (Var (shift v n), [])
     | otherwise -> return (Var v, [])
   Abs rel () tyA b -> do
-    (tyA', b') <- unM freshes
+    (tyA', b') <- freshes
     return (Abs rel () tyA' b', [k tyA tyA' n m, k b b' n (m+1)])
   Pi rel () tyA tyB -> do
-    (tyA', tyB') <- unM freshes
+    (tyA', tyB') <- freshes
     return (Pi rel () tyA' tyB', [k tyA tyA' n m, k tyB tyB' n (m+1)])
   App b a rel -> do
-    (b', a') <- unM freshes
+    (b', a') <- freshes
     return (App b' a' rel, [k b b' n m, k a a' n m])
 
-reduceH1 :: M H1 ()
-reduceH1 = M $ use ksH1 >>= reduceH1'
+reduceH1 :: MonadChoice m => m ()
+reduceH1 = use ksH1 >>= reduceH1'
 
-reduceH1' :: [K1] -> M' H1 ()
+reduceH1' :: MonadChoice m => [K1] -> m ()
 reduceH1' = loop
   where
     loop ks = do
@@ -148,7 +201,7 @@ reduceH1' = loop
       else
         ksH1 .= ks'
 
-reduceAtomH1 :: K1 -> WriterT Any (M' H1) [K1]
+reduceAtomH1 :: MonadChoice m => K1 -> WriterT Any m [K1]
 reduceAtomH1 (K1Eq u (Id_ v) 0 0) | u == v = return []
 reduceAtomH1 k@(K1Eq u (Id_ v) n m) = do
   eqns <- use eqnsH1
@@ -175,9 +228,12 @@ reduceAtomH1 k@(K1Sub u v w n') = do
       return (k1EqDC u h' : ks)
     Nothing -> case Map.lookup u eqns of
       Just h -> do
-        let left = return (Var n', [])
+        let left = return (Var n', [k1EqId u w n 0])
             right = lift $ refresh h 0 0 $ \v v' _ n' -> K1Sub v v' w n'
-        (h', ks) <- left <|> right
+        (h', ks) <- wrap $ Pick
+          [ (Left "Sub", left)
+          , (Right "NoSub", right)
+          ]
         eqnsH1 %= Map.insert v h'
         return ks
       Nothing -> return [k]
