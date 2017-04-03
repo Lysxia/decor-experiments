@@ -1,6 +1,7 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
@@ -19,38 +20,45 @@ import Control.Monad.Free
 import Control.Monad.State.Strict hiding (fail)
 import Control.Monad.Writer.Strict hiding (fail)
 import Lens.Micro.Platform
+import Data.Foldable
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Typeable
+import GHC.Generics (Generic)
 import Prelude hiding (fail)
 
 import Decor.Types
-import Decor.Soup hiding (M)
+import Decor.Soup
 
-data ChoiceF s a where
-  Tag :: s -> a -> ChoiceF s a
-  Inst :: [a] -> ChoiceF s a
-  Pick :: (Eq x, Show x, Typeable x) => [(x, a)] -> ChoiceF s a
-  Fail :: String -> ChoiceF s a
+data ChoiceF s a
+  = Tag s a
+  | Inst [a]
+  | Pick [(String, a)]
+  | Fail String
+  deriving Generic
 
 deriving instance (Show s, Show a) => Show (ChoiceF s a)
 deriving instance Functor (ChoiceF s)
 
-pick :: (Eq x, Show x, Typeable x) => [x] -> (x -> a) -> ChoiceF s a
-pick xs f = Pick [(x, f x) | x <- xs]
+-- pick :: (Eq x, Show x, Typeable x) => [x] -> (x -> a) -> ChoiceF s a
+-- pick xs f = Pick [(x, f x) | x <- xs]
 
 type MonadChoice m =
   ( MonadFree (ChoiceF S1) m
   , MonadState S1 m
   , MonadFresh m
   , MonadFail m
+  , MonadSoup m
   )
 
 tag :: MonadChoice m => m ()
 tag = get >>= \s -> wrap (Tag s (return ()))
 
-newtype M a = M { unM :: StateT S1 (Free (ChoiceF S1)) a }
+newtype M a = M { unM :: StateT S1 (Codensity (Free (ChoiceF S1))) a }
   deriving (Functor, Applicative, Monad, MonadState S1, MonadFree (ChoiceF S1))
+
+runM :: M a -> Free (ChoiceF S1) (a, S1)
+runM (M m) = lowerCodensity (runStateT m initS1)
 
 instance MonadFail M where
   fail = wrap . Fail
@@ -62,6 +70,9 @@ instance MonadFresh M where
     put (s { counter = i + 1 })
     return i
 
+instance MonadSoup M where
+  pick xs = liftF (Inst xs)
+
 type S1 = S H1
 
 type Alias = DCore_ Soup
@@ -69,7 +80,7 @@ type Alias = DCore_ Soup
 data H1 = H1
   { eqns :: Map DCId Alias
   , ks1 :: [K1]
-  } deriving Show
+  } deriving (Generic, Show)
 
 data K1
   = K1Eq DCId IdOrDC Shift DeBruijnV
@@ -82,7 +93,7 @@ data K1
   | K1Type Ctx DCId DCId
   | K1Rel Rel DeBruijnV DCId
   | K1WF Ctx
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic)
 
 data IdOrDC = Id_ DCId | DC_ (DCore_ Soup)
   deriving (Eq, Show)
@@ -100,7 +111,23 @@ eqnsH1 :: Lens' (S H1) (Map DCId Alias)
 eqnsH1 = l @"ks" . l @"eqns"
 
 initS1 :: S1
-initS1 = S 0 (H1 Map.empty [])
+initS1 = S 0 (H1 Map.empty [K1Type emptyCtx (DCId (-1)) (DCId (-2))])
+
+unfoldH1 :: MonadChoice m => m ()
+unfoldH1 = forever (instantiateH1 >> reduceH1)
+
+treeH1 :: Free (ChoiceF S1) ((), S1)
+treeH1 = runM unfoldH1
+
+instantiateH1 :: MonadChoice m => m ()
+instantiateH1 = do
+  ks <- use ksH1
+  eqns <- use eqnsH1
+  wrap . Inst $ do
+    (K1Type ctx t ty, ks) <- focus ks
+    guard (Map.notMember t eqns)
+    return $
+      typeCheck ctx t ty >>= traverse_ andK
 
 {-
   extractKType r = M $ do
@@ -231,8 +258,8 @@ reduceAtomH1 k@(K1Sub u v w n') = do
         let left = return (Var n', [k1EqId u w n 0])
             right = lift $ refresh h 0 0 $ \v v' _ n' -> K1Sub v v' w n'
         (h', ks) <- wrap $ Pick
-          [ (Left "Sub", left)
-          , (Right "NoSub", right)
+          [ ("Sub", left)
+          , ("NoSub", right)
           ]
         eqnsH1 %= Map.insert v h'
         return ks
