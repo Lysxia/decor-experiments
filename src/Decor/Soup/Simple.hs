@@ -57,8 +57,8 @@ tag = get >>= \s -> wrap (Tag s (return ()))
 newtype M a = M { unM :: StateT S1 (Codensity (Free (ChoiceF S1))) a }
   deriving (Functor, Applicative, Monad, MonadState S1, MonadFree (ChoiceF S1))
 
-runM :: M a -> Free (ChoiceF S1) (a, S1)
-runM (M m) = lowerCodensity (runStateT m initS1)
+runM :: M () -> Free (ChoiceF S1) S1
+runM (M m) = lowerCodensity (execStateT m initS1)
 
 instance MonadFail M where
   fail = wrap . Fail
@@ -114,9 +114,9 @@ initS1 :: S1
 initS1 = S 0 (H1 Map.empty [K1Type emptyCtx (DCId (-1)) (DCId (-2))])
 
 unfoldH1 :: MonadChoice m => m ()
-unfoldH1 = forever (instantiateH1 >> reduceH1)
+unfoldH1 = forever (instantiateH1 >> reduceH1 >> tag)
 
-treeH1 :: Free (ChoiceF S1) ((), S1)
+treeH1 :: Free (ChoiceF S1) S1
 treeH1 = runM unfoldH1
 
 instantiateH1 :: MonadChoice m => m ()
@@ -149,6 +149,7 @@ andKH1 (KEqDC t (RHSSub u v)) = return [K1Sub t u v 0]
 andKH1 (KType ctx t u) = return [K1Type ctx t u]
 andKH1 (KRel rel u) = return [K1Rel rel 0 u]
 andKH1 (KWF ctx) = return [K1WF ctx]
+andKH1 (K_ k) = andKH1 k
 
 -- eqHeadH1 :: DCId -> DCore_ Soup -> Shift -> Shift -> M' H1 [K1]
 -- eqHeadH1 t h = do

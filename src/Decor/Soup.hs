@@ -2,6 +2,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
@@ -306,7 +307,7 @@ initK = do
 data S h = S
   { counter :: !Integer
   , constraints :: h
-  } deriving Show
+  } deriving (Generic, Show)
 
 newtype Skip (t :: (* -> *) -> * -> *) (m :: * -> *) a
   = Skip { unSkip :: t m a }
