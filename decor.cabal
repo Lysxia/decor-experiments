@@ -44,6 +44,16 @@ source-repository head
   type:     git
   location: https://github.com/Lysxia/decor
 
+executable decor-simple
+  main-is: decor-simple.hs
+  hs-source-dirs: exe
+  build-depends:
+    base,
+    brick,
+    decor
+  ghc-options: -threaded
+  default-language: Haskell2010
+
 executable decor-magnifique
   main-is: decor-magnifique.hs
   hs-source-dirs: exe

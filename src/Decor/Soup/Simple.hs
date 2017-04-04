@@ -18,7 +18,6 @@ import Control.Monad.Codensity
 import Control.Monad.Fail
 import Control.Monad.Free
 import Control.Monad.State.Strict hiding (fail)
-import Control.Monad.Writer.Strict hiding (fail)
 import Lens.Micro.Platform
 import Data.Foldable
 import Data.Map (Map)
@@ -80,6 +79,7 @@ type Alias = DCore_ Soup
 data H1 = H1
   { eqns :: Map DCId Alias
   , ks1 :: [K1]
+  , ksHistory :: Map K1 [K1]
   } deriving (Generic, Show)
 
 data K1
@@ -93,10 +93,10 @@ data K1
   | K1Type Ctx DCId DCId
   | K1Rel Rel DeBruijnV DCId
   | K1WF Ctx
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Ord, Show, Generic)
 
 data IdOrDC = Id_ DCId | DC_ (DCore_ Soup)
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 k1EqId :: DCId -> DCId -> Shift -> DeBruijnV -> K1
 k1EqId u v = K1Eq u (Id_ v)
@@ -110,8 +110,11 @@ ksH1 = l @"ks" . l @"ks"
 eqnsH1 :: Lens' (S H1) (Map DCId Alias)
 eqnsH1 = l @"ks" . l @"eqns"
 
+ksHistoryH1 :: Lens' (S H1) (Map K1 [K1])
+ksHistoryH1 = l @"ks" . l @"history"
+
 initS1 :: S1
-initS1 = S 0 (H1 Map.empty [K1Type emptyCtx (DCId (-1)) (DCId (-2))])
+initS1 = S 0 (H1 Map.empty [K1Type emptyCtx (DCId (-1)) (DCId (-2))] Map.empty)
 
 unfoldH1 :: MonadChoice m => m ()
 unfoldH1 = forever (instantiateH1 >> reduceH1 >> tag)
@@ -223,41 +226,50 @@ reduceH1' :: MonadChoice m => [K1] -> m ()
 reduceH1' = loop
   where
     loop ks = do
-      (ks', Any continue) <- runWriterT . fmap concat $ traverse reduceAtomH1 ks
-      if continue then
+      ks' <- fmap concat $ traverse reduceAtomH1_ ks
+      if ks /= ks' then
         loop ks'
       else
         ksH1 .= ks'
 
-reduceAtomH1 :: MonadChoice m => K1 -> WriterT Any m [K1]
+reduceAtomH1_ :: MonadChoice m => K1 -> m [K1]
+reduceAtomH1_ k = do
+  ks <- reduceAtomH1 k
+  case ks of
+    [k'] | k == k' -> return ks
+    _ -> do
+      ksHistoryH1 %= Map.insert k ks
+      return ks
+
+reduceAtomH1 :: MonadChoice m => K1 -> m [K1]
 reduceAtomH1 (K1Eq u (Id_ v) 0 0) | u == v = return []
 reduceAtomH1 k@(K1Eq u (Id_ v) n m) = do
   eqns <- use eqnsH1
   case (Map.lookup u eqns, Map.lookup v eqns) of
     (Nothing, Nothing) -> return [k]
-    (Just h, Just h') -> lift (eqHeadsH1 h h' n m)
+    (Just h, Just h') -> eqHeadsH1 h h' n m
     (Nothing, Just h') -> return [K1Eq u (DC_ h') n m]
     (Just h, Nothing) -> return [K1Eq v (DC_ h) (-n) m]
 reduceAtomH1 (K1Eq u (DC_ h) n m) = do
   eqns <- use eqnsH1
   case Map.lookup u eqns of
     Nothing -> do
-      (h', ks) <- lift (refresh h n m k1EqId)
+      (h', ks) <- refresh h n m k1EqId
       eqnsH1 %= Map.insert u h'
       return ks
-    Just h0 -> lift (eqHeadsH1 h0 h n m)
+    Just h0 -> eqHeadsH1 h0 h n m
 reduceAtomH1 k@(K1Sub u v w n') = do
   let DeBruijnV n = n'
   eqns <- use eqnsH1
   case Map.lookup v eqns of
     Just (Var x) | x == n' -> return [k1EqId u w n 0]
     Just h -> do
-      (h', ks) <- lift $ refresh h (-1) n' $ \v v' _ n' -> K1Sub v' v w n'
+      (h', ks) <- refresh h (-1) n' $ \v v' _ n' -> K1Sub v' v w n'
       return (k1EqDC u h' : ks)
     Nothing -> case Map.lookup u eqns of
       Just h -> do
         let left = return (Var n', [k1EqId u w n 0])
-            right = lift $ refresh h 0 0 $ \v v' _ n' -> K1Sub v v' w n'
+            right = refresh h 0 0 $ \v v' _ n' -> K1Sub v v' w n'
         (h', ks) <- wrap $ Pick
           [ ("Sub", left)
           , ("NoSub", right)
@@ -362,4 +374,7 @@ instance L "ks" H1 [K1] where
 
 instance L "eqns" H1 (Map DCId Alias) where
   l f h = fmap (\eqns -> h { eqns = eqns }) (f (eqns h))
+
+instance L "history" H1 (Map K1 [K1]) where
+  l f h = fmap (\ksHistory -> h { ksHistory = ksHistory }) (f (ksHistory h))
 
