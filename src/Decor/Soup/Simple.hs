@@ -22,6 +22,7 @@ import Lens.Micro.Platform
 import Data.Foldable
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Tree
 import Data.Typeable
 import GHC.Generics (Generic)
 import Prelude hiding (fail)
@@ -114,12 +115,17 @@ ksHistoryH1 :: Lens' (S H1) (Map K1 [K1])
 ksHistoryH1 = l @"ks" . l @"history"
 
 initS1 :: S1
-initS1 = S 0 (H1 Map.empty [K1Type emptyCtx (DCId (-1)) (DCId (-2))] Map.empty)
+initS1 = S 0 (H1 Map.empty [k0] Map.empty)
+
+k0 :: K1
+k0 = K1Type emptyCtx (DCId (-1)) (DCId (-2))
 
 unfoldH1 :: MonadChoice m => m ()
 unfoldH1 = forever (instantiateH1 >> reduceH1 >> tag)
 
-treeH1 :: Free (ChoiceF S1) S1
+type Tree_ s = Free (ChoiceF s) s
+
+treeH1 :: Tree_ S1
 treeH1 = runM unfoldH1
 
 instantiateH1 :: MonadChoice m => m ()
@@ -378,3 +384,19 @@ instance L "eqns" H1 (Map DCId Alias) where
 instance L "history" H1 (Map K1 [K1]) where
   l f h = fmap (\ksHistory -> h { ksHistory = ksHistory }) (f (ksHistory h))
 
+currentDerivation :: S1 -> Tree K1
+currentDerivation = derivationH1 . ksHistory . constraints
+
+derivationH1 :: Map K1 [K1] -> Tree K1
+derivationH1 history = unfoldTree f k0
+  where
+    f k = (k, msum (Map.lookup k history))
+
+showK1 :: K1 -> String
+showK1 = undefined
+
+showTree :: Tree K1 -> String
+showTree = drawTree . fmap showK1
+
+showCurrentDerivation :: S1 -> String
+showCurrentDerivation = showTree . currentDerivation

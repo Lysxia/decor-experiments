@@ -338,3 +338,15 @@ class L (n :: Symbol) s a | n s -> a where
 
 instance L "ks" (S h) h where
   l f s = fmap (\h -> s { constraints = h }) (f (constraints s))
+
+showDCoreSoup :: DCore_ Soup -> String
+showDCoreSoup t = case t of
+  Star -> "*"
+  Var (DeBruijnV x) -> "|" ++ show x
+  App t u rel -> show t ++ " " ++ show u ++ sRel rel
+  Pi rel () u v -> "Π" ++ sRel rel ++ " " ++ show u ++ " -> " ++ show v
+  Abs rel () u v -> "λ" ++ sRel rel ++ " " ++ show u ++ " . " ++ show v
+
+sRel :: Rel -> String
+sRel Rel = "+"
+sRel Irr = "-"

@@ -50,18 +50,3 @@ instance IsContext (NoCtx K1) where
   key = undefined
   down _ _ = Nothing
   cons = undefined
-
-showDCoreSoup :: DCore_ Soup -> String
-showDCoreSoup t = case t of
-  Star -> "*"
-  Var (DeBruijnV x) -> "|" ++ show x
-  App t u rel -> show t ++ " " ++ show u ++ sRel rel
-  Pi rel () u v -> "Π" ++ sRel rel ++ " " ++ show u ++ " -> " ++ show v
-  Abs rel () u v -> "λ" ++ sRel rel ++ " " ++ show u ++ " . " ++ show v
-
-sRel :: Rel -> String
-sRel Rel = "+"
-sRel Irr = "-"
-
-showK1 :: K1 -> String
-showK1 = undefined

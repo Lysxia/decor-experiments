@@ -50,6 +50,8 @@ executable decor-simple
   build-depends:
     base,
     brick,
+    free,
+    vty,
     decor
   ghc-options: -threaded
   default-language: Haskell2010
