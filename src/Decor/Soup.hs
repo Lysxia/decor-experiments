@@ -26,6 +26,7 @@ import Control.Monad.Writer
 import Control.Comonad.Cofree
 
 import Data.Maybe
+import Data.Typeable
 
 import Data.Bimap (Bimap)
 import qualified Data.Bimap as Bimap
@@ -50,16 +51,16 @@ type instance DCore Soup = DCId
 type instance Coercion Soup = CoercionId
 
 newtype DeBruijnV = DeBruijnV Integer
-  deriving (Eq, Ord, Show, Num)
+  deriving (Eq, Ord, Show, Enum)
 
 shift :: DeBruijnV -> Shift -> DeBruijnV
-shift v s = v + DeBruijnV s
+shift (DeBruijnV i) s = DeBruijnV (i + s)
 
 asShift :: DeBruijnV -> Shift
 asShift (DeBruijnV i) = i
 
 newtype DeBruijnC = DeBruijnC Integer
-  deriving (Eq, Ord, Show, Num)
+  deriving (Eq, Ord, Show, Enum)
 
 newtype DCId = DCId Integer
   deriving (Eq, Ord)
@@ -135,7 +136,10 @@ data RHS
   deriving (Eq, Ord, Show)
 
 class (Monad m, MonadFresh m) => MonadSoup m where
-  pick :: [a] -> m a
+  pick :: (Show x, Typeable x) => [(x, a)] -> m a
+
+pick' :: (Show x, Typeable x, MonadSoup m) => [x] -> m x
+pick' xs = pick [(x, x) | x <- xs]
 
 class Applicative m => MonadFresh m where
   freshI :: m Integer
@@ -176,10 +180,10 @@ data Ctx' = Ctx' [DeBruijnC]
   deriving (Eq, Ord, Show)
 
 cctx :: Ctx -> Ctx'
-cctx ctx = Ctx' (fromIntegral <$> [0 .. length (cVarCtx ctx)])
+cctx ctx = Ctx' (toEnum <$> [0 .. length (cVarCtx ctx)])
 
-pickVar :: MonadSoup m => Ctx -> m (DeBruijnV, DCId)
-pickVar ctx = pick (zip (DeBruijnV <$> [0 ..]) (varCtx ctx))
+pickVar :: MonadSoup m => Ctx -> m DeBruijnV
+pickVar ctx = pick' (toEnum <$> [0 .. length (varCtx ctx) - 1])
 
 lookupVar :: DeBruijnV -> Ctx -> Maybe DCId
 lookupVar (DeBruijnV n) ctx = listToMaybe $ drop (fromIntegral n) (varCtx ctx)
@@ -190,16 +194,13 @@ insertVar ty ctx = ctx { varCtx = ty : varCtx ctx }
 insertCVar :: EqProp DCId -> Ctx -> Ctx
 insertCVar phi ctx = ctx { cVarCtx = phi : cVarCtx ctx }
 
-alternate3 :: MonadSoup m => [a -> b -> c -> m d] -> a -> b -> c -> m d
-alternate3 fs a b c = pick fs >>= \f -> f a b c
-
 typeCheck :: MonadSoup m => Ctx -> DCId -> DCId -> m [K]
 typeCheck ctx t tyT = pick
-  [ return Star
-  , pickVar ctx <&> \(x, _) -> Var x
-  , pick [Rel, Irr] >>= \rel -> freshes <&> \(tyA, tyB) -> Pi rel () tyA tyB
-  , pick [Rel, Irr] >>= \rel -> freshes <&> \(tyA, b) -> Abs rel () tyA b
-  , pick [Rel, Irr] >>= \rel -> freshes <&> \(b, a) -> App b a rel
+  [ (L "*", return Star)
+  , (L "v", pickVar ctx <&> \x -> Var x)
+  , (L "Π", pick' [Rel, Irr] >>= \rel -> freshes <&> \(tyA, tyB) -> Pi rel () tyA tyB)
+  , (L "λ", pick' [Rel, Irr] >>= \rel -> freshes <&> \(tyA, b) -> Abs rel () tyA b)
+  , (L ";", pick' [Rel, Irr] >>= \rel -> freshes <&> \(b, a) -> App b a rel)
   ] >>= \h_ -> h_ >>= \h -> (kEqDC t (RHSHead h) :) <$> typeCheck' ctx tyT h
   where
     (<&>) :: Functor f => f a -> (a -> b) -> f b
@@ -323,10 +324,10 @@ size :: Foldable f => Cofree f a -> Integer
 size = getSum . size'
   where size' (_ :< f) = 1 + foldMap size' f
 
-class L (n :: Symbol) s a | n s -> a where
+class Lns (n :: Symbol) s a | n s -> a where
   l :: Lens' s a
 
-instance L "ks" (S h) h where
+instance Lns "ks" (S h) h where
   l f s = fmap (\h -> s { constraints = h }) (f (constraints s))
 
 showDCoreSoup :: DCore_ Soup -> String

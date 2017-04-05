@@ -22,6 +22,8 @@ import Lens.Micro.Platform
 import Data.Foldable
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Maybe
+import Data.Traversable
 import Data.Tree
 import Data.Typeable
 import GHC.Generics (Generic)
@@ -32,12 +34,10 @@ import Decor.Soup
 
 data ChoiceF s a
   = Tag s a
-  | Inst [a]
-  | Pick [(String, a)]
+  | forall x. (Typeable x, Show x) => Pick [(x, a)]
   | Fail String
-  deriving Generic
 
-deriving instance (Show s, Show a) => Show (ChoiceF s a)
+-- deriving instance (Show s, Show a) => Show (ChoiceF s a)
 deriving instance Functor (ChoiceF s)
 
 -- pick :: (Eq x, Show x, Typeable x) => [x] -> (x -> a) -> ChoiceF s a
@@ -71,7 +71,7 @@ instance MonadFresh M where
     return i
 
 instance MonadSoup M where
-  pick xs = liftF (Inst xs) >>= \x -> tag >> return x
+  pick xs = liftF (Pick xs) >>= \x -> tag >> return x
 
 type S1 = S H1
 
@@ -103,7 +103,7 @@ k1EqId :: DCId -> DCId -> Shift -> DeBruijnV -> K1
 k1EqId u v = K1Eq u (Id_ v)
 
 k1EqDC :: DCId -> DCore_ Soup -> K1
-k1EqDC u v = K1Eq u (DC_ v) 0 0
+k1EqDC u v = K1Eq u (DC_ v) (toEnum 0) (toEnum 0)
 
 ksH1 :: Lens' (S H1) [K1]
 ksH1 = l @"ks" . l @"ks"
@@ -126,21 +126,56 @@ unfoldH1 = forever (instantiateH1 >> tag >> reduceH1 >> tag)
 type Tree_ s = Free (ChoiceF s) s
 
 treeH1 :: Tree_ S1
-treeH1 = runM unfoldH1
+treeH1 = (quickPrune 3 . collapseTags 10 . runM) unfoldH1
+
+collapseTags :: Int -> Free (ChoiceF s) a -> Free (ChoiceF s) a
+collapseTags fuel = everywhere (collapse fuel)
+  where
+    collapse n (Free (Tag _ t@(Free (Tag _ _)))) | n > 0 = collapse (n-1) t
+    collapse _ f = f
+
+quickPrune :: Int -> Free (ChoiceF s) a -> Free (ChoiceF s) a
+quickPrune fuel = everywhere (prune fuel)
+  where
+    prune n (Free f) | n > 0 = Free $ case fmap (prune (n-1)) f of
+      Pick xs ->
+        case [(x, a) | (x, a@(Free f)) <- xs, not (isFail f)] of
+          [] -> Fail "No good pick"
+          xs -> Pick xs
+      Fail s -> Fail s
+      Tag _ (Free (Fail e)) -> Fail e
+      f -> f
+    prune _ t = t
+
+everywhere :: Functor f => (Free f a -> Free f a) -> Free f a -> Free f a
+everywhere p t =
+  case p t of
+    Pure a -> Pure a
+    Free f -> Free (fmap (everywhere p) f)
+
+isFail :: ChoiceF s a -> Bool
+isFail (Fail _) = True
+isFail _ = False
 
 instantiateH1 :: MonadChoice m => m ()
 instantiateH1 = do
   ks <- use ksH1
   eqns <- use eqnsH1
-  wrap . Inst $ do
-    (k1@(K1Type ctx t ty), ks') <- focus ks
-    guard (Map.notMember t eqns)
-    return $ do
-      ksH1 .= ks'
-      typeCheck ctx t ty >>= traverse andK >>= \ks1' -> do
-        let ks1 = concat ks1'
-        ksH1 %= (ks1 ++)
-        ksHistoryH1 %= Map.insert k1 ks1
+  picks <- for (focus ks) $ \(k1, ks') ->
+    case k1 of
+      K1Type ctx t ty -> do
+        k1Str <- get <&> \s -> showK1 s k1
+        return . Just $
+          ( L (fromMaybe "Typing judgement" k1Str)
+          , do
+              ksH1 .= ks'
+              typeCheck ctx t ty >>= traverse andK >>= \ks1' -> do
+                let ks1 = concat ks1'
+                ksH1 %= (ks1 ++)
+                ksHistoryH1 %= Map.insert k1 ks1
+          )
+      _ -> return Nothing
+  join $ pick (catMaybes picks)
 
 {-
   extractKType r = M $ do
@@ -157,10 +192,10 @@ andK k = return [toK1 k]
 
 toK1 :: K -> K1
 toK1 (KEqDC t (RHSHead h)) = k1EqDC t h
-toK1 (KEqDC t (RHSId u n)) = k1EqId t u n 0
-toK1 (KEqDC t (RHSSub u v)) = K1Sub t u v 0
+toK1 (KEqDC t (RHSId u n)) = k1EqId t u n (toEnum 0)
+toK1 (KEqDC t (RHSSub u v)) = K1Sub t u v (toEnum 0)
 toK1 (KType ctx t u) = K1Type ctx t u
-toK1 (KRel rel u) = K1Rel rel 0 u
+toK1 (KRel rel u) = K1Rel rel (toEnum 0) u
 toK1 (KWF ctx) = K1WF ctx
 toK1 (K_ k) = toK1 k
 
@@ -187,7 +222,7 @@ eqHeadsH1 e1 e2 n m = case (e1, e2) of
     | rel1 == rel2 ->
         return
           [ k1EqId tyA1 tyA2 n  m
-          , k1EqId b1   b2   n (m+1)
+          , k1EqId b1   b2   n (succ m)
           ]
   (Abs{}, _) -> fail "Abs"
 
@@ -195,7 +230,7 @@ eqHeadsH1 e1 e2 n m = case (e1, e2) of
     | rel1 == rel2 ->
         return
           [ k1EqId tyA1 tyA2 n  m
-          , k1EqId tyB1 tyB2 n (m+1)
+          , k1EqId tyB1 tyB2 n (succ m)
           ]
   (Pi{}, _) -> fail "Pi"
 
@@ -212,7 +247,7 @@ refresh
   => DCore_ Soup -> Shift -> DeBruijnV
   -> (DCId -> DCId -> Shift -> DeBruijnV -> K1)
   -> m (DCore_ Soup, [K1])
-refresh h 0 0 _ = return (h, [])
+refresh h 0 (DeBruijnV 0) _ = return (h, [])
 refresh h n m k = case h of
   Star -> return (Star, [])
   Var v
@@ -221,10 +256,10 @@ refresh h n m k = case h of
     | otherwise -> return (Var v, [])
   Abs rel () tyA b -> do
     (tyA', b') <- freshes
-    return (Abs rel () tyA' b', [k tyA tyA' n m, k b b' n (m+1)])
+    return (Abs rel () tyA' b', [k tyA tyA' n m, k b b' n (succ m)])
   Pi rel () tyA tyB -> do
     (tyA', tyB') <- freshes
-    return (Pi rel () tyA' tyB', [k tyA tyA' n m, k tyB tyB' n (m+1)])
+    return (Pi rel () tyA' tyB', [k tyA tyA' n m, k tyB tyB' n (succ m)])
   App b a rel -> do
     (b', a') <- freshes
     return (App b' a' rel, [k b b' n m, k a a' n m])
@@ -252,7 +287,7 @@ reduceAtomH1_ k = do
       return ks
 
 reduceAtomH1 :: MonadChoice m => K1 -> m [K1]
-reduceAtomH1 (K1Eq u (Id_ v) 0 0) | u == v = return []
+reduceAtomH1 (K1Eq u (Id_ v) 0 (DeBruijnV 0)) | u == v = return []
 reduceAtomH1 k@(K1Eq u (Id_ v) n m) = do
   eqns <- use eqnsH1
   case (Map.lookup u eqns, Map.lookup v eqns) of
@@ -272,17 +307,17 @@ reduceAtomH1 k@(K1Sub u v w n') = do
   let DeBruijnV n = n'
   eqns <- use eqnsH1
   case Map.lookup v eqns of
-    Just (Var x) | x == n' -> return [k1EqId u w n 0]
+    Just (Var x) | x == n' -> return [k1EqId u w n (toEnum 0)]
     Just h -> do
       (h', ks) <- refresh h (-1) n' $ \v v' _ n' -> K1Sub v' v w n'
       return (k1EqDC u h' : ks)
     Nothing -> case Map.lookup u eqns of
       Just h -> do
-        let left = return (Var n', [k1EqId u w n 0])
-            right = refresh h 0 0 $ \v v' _ n' -> K1Sub v v' w n'
+        let left = return (Var n', [k1EqId u w n (toEnum 0)])
+            right = refresh h 0 (toEnum 0) $ \v v' _ n' -> K1Sub v v' w n'
         (h', ks) <- wrap $ Pick
-          [ ("Sub", left)
-          , ("NoSub", right)
+          [ (L "Sub", left)
+          , (L "NoSub", right)
           ]
         eqnsH1 %= Map.insert v h'
         return ks
@@ -384,13 +419,13 @@ lookupH1V t = do
     Just (Head e) -> return (Right (t, e))
 -}
 
-instance L "ks" H1 [K1] where
+instance Lns "ks" H1 [K1] where
   l f h = fmap (\ks -> h { ks1 = ks }) (f (ks1 h))
 
-instance L "eqns" H1 (Map DCId Alias) where
+instance Lns "eqns" H1 (Map DCId Alias) where
   l f h = fmap (\eqns -> h { eqns = eqns }) (f (eqns h))
 
-instance L "history" H1 (Map K1 [K1]) where
+instance Lns "history" H1 (Map K1 [K1]) where
   l f h = fmap (\ksHistory -> h { ksHistory = ksHistory }) (f (ksHistory h))
 
 currentDerivation :: S1 -> Tree K1
@@ -403,7 +438,7 @@ derivationH1 history = unfoldTree f k0
 
 showK1 :: S1 -> K1 -> Maybe String
 showK1 s (K1Type ctx u v) =
-  Just (showCtx s ctx ++ "|-" ++ showDCHead s u ++ ":" ++ showDCHead s v)
+  Just (showCtx s ctx ++ " |- " ++ showDCHead s u ++ " : " ++ showDCHead s v)
 showK1 _ _ = Nothing
 
 showCtx _ _ = "_"

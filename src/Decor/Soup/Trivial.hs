@@ -30,7 +30,7 @@ instance MonadFresh (M h) where
     let i = counter s in (i, s {counter = i+1})
 
 instance MonadSoup (M h) where
-  pick = M . lift . lift
+  pick = M . lift . lift . fmap snd
 
 runM :: KStore h => M h [K] -> S h -> ForkF (S h)
 runM = execStateT . unM . (>>= andKs)

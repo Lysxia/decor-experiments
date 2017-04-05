@@ -59,7 +59,6 @@ progress 0 z t = (z, t)
 progress _ _ t@(Pure s) = (Right s, t)
 progress fuel z t@(Free f) = case f of
   Tag s f -> progress (fuel - 1) (Right s) f
-  Inst _ -> (z, t)
   Pick _ -> (z, t)
   Fail e -> (Left e, t)
 
@@ -67,8 +66,7 @@ children :: Tree_ s -> [(String, Either String s, Tree_ s)]
 children (Pure s) = []
 children (Free f) = case f of
   Tag s f -> [name "Checkpoint" f]
-  Inst fs -> [name "Inst" f | f <- fs]
-  Pick xfs -> [name ("Pick[" ++ x ++ "]") f | (x, f) <- xfs]
+  Pick xfs -> [name ("Pick[" ++ show x ++ "]") f | (x, f) <- xfs]
   Fail e -> []
   where
     progress' = progress 10 (Left "Progress")

@@ -93,3 +93,7 @@ newtype CVarId = CVarId Integer
 newtype FunId = FunId Integer
   deriving (Eq, Ord, Show)
 
+newtype L = L String
+
+instance Show L where
+  show (L s) = s
