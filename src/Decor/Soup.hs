@@ -21,6 +21,7 @@ module Decor.Soup where
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Except
+import Control.Monad.Fail as MonadFail
 import Control.Monad.Writer
 
 import Control.Comonad.Cofree
@@ -135,11 +136,11 @@ data RHS
   | RHSSubC CoercionId DCId
   deriving (Eq, Ord, Show)
 
-class (Monad m, MonadFresh m) => MonadSoup m where
-  pick :: (Show x, Typeable x) => [(x, a)] -> m a
+class (Monad m, MonadFresh m, MonadFail m) => MonadSoup m where
+  pick :: (Show x, Typeable x) => String -> [(x, a)] -> m a
 
-pick' :: (Show x, Typeable x, MonadSoup m) => [x] -> m x
-pick' xs = pick [(x, x) | x <- xs]
+pick' :: (Show x, Typeable x, MonadSoup m) => String -> [x] -> m x
+pick' d xs = pick d [(x, x) | x <- xs]
 
 class Applicative m => MonadFresh m where
   freshI :: m Integer
@@ -183,7 +184,7 @@ cctx :: Ctx -> Ctx'
 cctx ctx = Ctx' (toEnum <$> [0 .. length (cVarCtx ctx)])
 
 pickVar :: MonadSoup m => Ctx -> m DeBruijnV
-pickVar ctx = pick' (toEnum <$> [0 .. length (varCtx ctx) - 1])
+pickVar ctx = pick' "Var" (toEnum <$> [0 .. length (varCtx ctx) - 1])
 
 lookupVar :: DeBruijnV -> Ctx -> Maybe DCId
 lookupVar (DeBruijnV n) ctx = listToMaybe $ drop (fromIntegral n) (varCtx ctx)
@@ -195,12 +196,12 @@ insertCVar :: EqProp DCId -> Ctx -> Ctx
 insertCVar phi ctx = ctx { cVarCtx = phi : cVarCtx ctx }
 
 typeCheck :: MonadSoup m => Ctx -> DCId -> DCId -> m [K]
-typeCheck ctx t tyT = pick
+typeCheck ctx t tyT = pick "Head"
   [ (L "*", return Star)
   , (L "v", pickVar ctx <&> \x -> Var x)
-  , (L "Π", pick' [Rel, Irr] >>= \rel -> freshes <&> \(tyA, tyB) -> Pi rel () tyA tyB)
-  , (L "λ", pick' [Rel, Irr] >>= \rel -> freshes <&> \(tyA, b) -> Abs rel () tyA b)
-  , (L ";", pick' [Rel, Irr] >>= \rel -> freshes <&> \(b, a) -> App b a rel)
+  , (L "Π", pick' "Rel" [Rel, Irr] >>= \rel -> freshes <&> \(tyA, tyB) -> Pi rel () tyA tyB)
+  , (L "λ", pick' "Rel" [Rel, Irr] >>= \rel -> freshes <&> \(tyA, b) -> Abs rel () tyA b)
+  , (L ";", pick' "Rel" [Rel, Irr] >>= \rel -> freshes <&> \(b, a) -> App b a rel)
   ] >>= \h_ -> h_ >>= \h -> (kEqDC t (RHSHead h) :) <$> typeCheck' ctx tyT h
   where
     (<&>) :: Functor f => f a -> (a -> b) -> f b
@@ -214,7 +215,7 @@ typeCheck' _ctx tyT Star = do
 
 typeCheck' ctx tyT (Var x) = do
   case lookupVar x ctx of
-    Nothing -> fail "Unbound variable"
+    Nothing -> MonadFail.fail "Unbound variable"
     Just ty ->
       return
         [ kEqDC tyT (RHSId ty (asShift x + 1))
@@ -333,7 +334,7 @@ instance Lns "ks" (S h) h where
 showDCoreSoup :: DCore_ Soup -> String
 showDCoreSoup t = case t of
   Star -> "*"
-  Var (DeBruijnV x) -> "|" ++ show x
+  Var (DeBruijnV x) -> "i" ++ show x
   App t u rel -> show t ++ " " ++ show u ++ sRel rel
   Pi rel () u v -> "Π" ++ sRel rel ++ " " ++ show u ++ " -> " ++ show v
   Abs rel () u v -> "λ" ++ sRel rel ++ " " ++ show u ++ " . " ++ show v

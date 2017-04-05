@@ -34,7 +34,7 @@ import Decor.Soup
 
 data ChoiceF s a
   = Tag s a
-  | forall x. (Typeable x, Show x) => Pick [(x, a)]
+  | forall x. (Typeable x, Show x) => Pick String [(x, a)]
   | Fail String
 
 -- deriving instance (Show s, Show a) => Show (ChoiceF s a)
@@ -57,8 +57,8 @@ tag = get >>= \s -> wrap (Tag s (return ()))
 newtype M a = M { unM :: StateT S1 (Codensity (Free (ChoiceF S1))) a }
   deriving (Functor, Applicative, Monad, MonadState S1, MonadFree (ChoiceF S1))
 
-runM :: M () -> Free (ChoiceF S1) S1
-runM (M m) = lowerCodensity (execStateT m initS1)
+runM :: M a -> Free (ChoiceF S1) a
+runM (M m) = lowerCodensity (evalStateT m initS1)
 
 instance MonadFail M where
   fail = wrap . Fail
@@ -71,7 +71,7 @@ instance MonadFresh M where
     return i
 
 instance MonadSoup M where
-  pick xs = liftF (Pick xs) >>= \x -> tag >> return x
+  pick d xs = tag >> liftF (Pick d xs) >>= \x -> tag >> return x
 
 type S1 = S H1
 
@@ -120,8 +120,12 @@ initS1 = S 0 (H1 Map.empty [k0] Map.empty)
 k0 :: K1
 k0 = K1Type emptyCtx (DCId (-1)) (DCId (-2))
 
-unfoldH1 :: MonadChoice m => m ()
-unfoldH1 = forever (instantiateH1 >> tag >> reduceH1 >> tag)
+unfoldH1 :: MonadChoice m => m S1
+unfoldH1 = tag >> instantiateH1 >>= \done ->
+  if done then
+    get
+  else
+    reduceH1 >> unfoldH1
 
 type Tree_ s = Free (ChoiceF s) s
 
@@ -138,14 +142,16 @@ quickPrune :: Int -> Free (ChoiceF s) a -> Free (ChoiceF s) a
 quickPrune fuel = everywhere (prune fuel)
   where
     prune n (Free f) | n > 0 = Free $ case fmap (prune (n-1)) f of
-      Pick xs ->
-        case [(x, a) | (x, a@(Free f)) <- xs, not (isFail f)] of
+      Pick d xs ->
+        case [(x, a) | (x, a) <- xs, not (isFail a)] of
           [] -> Fail "No good pick"
-          xs -> Pick xs
+          xs -> Pick d xs
       Fail s -> Fail s
       Tag _ (Free (Fail e)) -> Fail e
       f -> f
     prune _ t = t
+    isFail (Free (Fail _)) = True
+    isFail _ = False
 
 everywhere :: Functor f => (Free f a -> Free f a) -> Free f a -> Free f a
 everywhere p t =
@@ -153,11 +159,7 @@ everywhere p t =
     Pure a -> Pure a
     Free f -> Free (fmap (everywhere p) f)
 
-isFail :: ChoiceF s a -> Bool
-isFail (Fail _) = True
-isFail _ = False
-
-instantiateH1 :: MonadChoice m => m ()
+instantiateH1 :: MonadChoice m => m Bool
 instantiateH1 = do
   ks <- use ksH1
   eqns <- use eqnsH1
@@ -175,7 +177,11 @@ instantiateH1 = do
                 ksHistoryH1 %= Map.insert k1 ks1
           )
       _ -> return Nothing
-  join $ pick (catMaybes picks)
+  case catMaybes picks of
+    [] -> return True
+    picks -> do
+      join $ pick "Type" picks
+      return False
 
 {-
   extractKType r = M $ do
@@ -265,7 +271,7 @@ refresh h n m k = case h of
     return (App b' a' rel, [k b b' n m, k a a' n m])
 
 reduceH1 :: MonadChoice m => m ()
-reduceH1 = use ksH1 >>= reduceH1'
+reduceH1 = tag >> use ksH1 >>= reduceH1'
 
 reduceH1' :: MonadChoice m => [K1] -> m ()
 reduceH1' = loop
@@ -315,7 +321,7 @@ reduceAtomH1 k@(K1Sub u v w n') = do
       Just h -> do
         let left = return (Var n', [k1EqId u w n (toEnum 0)])
             right = refresh h 0 (toEnum 0) $ \v v' _ n' -> K1Sub v v' w n'
-        (h', ks) <- wrap $ Pick
+        (h', ks) <- join $ pick "Sub"
           [ (L "Sub", left)
           , (L "NoSub", right)
           ]
@@ -438,13 +444,16 @@ derivationH1 history = unfoldTree f k0
 
 showK1 :: S1 -> K1 -> Maybe String
 showK1 s (K1Type ctx u v) =
-  Just (showCtx s ctx ++ " |- " ++ showDCHead s u ++ " : " ++ showDCHead s v)
+  Just
+    ( showCtx s ctx ++
+      " |- " ++ showDCHead s u ((show u ++ " = ") ++) ++
+      " : " ++ showDCHead s v (++ (" = " ++ show v)))
 showK1 _ _ = Nothing
 
 showCtx _ _ = "_"
 
-showDCHead s u = case Map.lookup u (s ^. eqnsH1) of
-  Just a -> showDCoreSoup a
+showDCHead s u cont = case Map.lookup u (s ^. eqnsH1) of
+  Just a -> cont (showDCoreSoup a)
   Nothing -> show u
 
 joinTree :: Tree (Maybe a) -> Forest a
@@ -459,3 +468,9 @@ showTree s = drawForest . joinTree . fmap (showK1 s)
 
 showCurrentDerivation :: S1 -> String
 showCurrentDerivation s = showTree s (currentDerivation s)
+
+showRoot :: Free (ChoiceF s) a -> String
+showRoot (Free Tag{}) = "Continue"
+showRoot (Free (Fail e)) = "Fail: " ++ e
+showRoot (Free (Pick d _)) = "Pick[" ++ d ++ "]"
+showRoot (Pure a) = "Done"

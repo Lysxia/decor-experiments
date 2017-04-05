@@ -11,63 +11,75 @@ import Decor.Soup.Simple
 
 main = defaultMain
   app
-  (return (children treeH1, 0))
+  (return (children initS1 treeH1, 0))
 
-type Zs = [(String, Either String S1, Tree_ S1)]
+type Zs = [(String, S1, Tree_ S1)]
 
 main_window = "main"
 
+level :: Zs -> Int -> r -> (String -> S1 -> Tree_ S1 -> r) -> r
+level zs k r cont = case drop k zs of
+  (key, s, t) : _ -> cont key s t
+  _ -> r
+
 app :: App (NonEmpty (Zs, Int)) () String
 app = App
-  { appDraw = \((zs, k) :| _) ->
-      [ viewport main_window Both $
-          case drop k zs of
-            (key, z, _) : _  ->
-              str (show k ++ ": " ++ key) <=>
-              str (either id showCurrentDerivation z)
-            [] -> str "[]"
+  { appDraw = \history@((zs, k) :| _) ->
+      [ level zs k (str "[]") $ \key s t ->
+          viewport main_window Both
+            (str (showCurrentDerivation s))
+          <+>
+          ( str (showRoot t)
+            <=>
+            foldr
+              ((<=>) . \(zs, k) ->
+                level zs k (str "?") $ \key _ _ ->
+                  str (show k ++ ". " ++ key))
+              emptyWidget
+              history
+          )
       ]
   , appChooseCursor = \_ _ -> Nothing
-  , appHandleEvent = \s@((zs, k) :| hs) e -> case e of
+  , appHandleEvent = \hs_@((zs, k) :| hs) e -> case e of
       VtyEvent e -> case e of
-        EvKey (KChar 'h') [] -> hScrollBy scr (-1) >> continue s
-        EvKey (KChar 'j') [] -> vScrollBy scr 1 >> continue s
-        EvKey (KChar 'k') [] -> vScrollBy scr (-1) >> continue s
-        EvKey (KChar 'l') [] -> hScrollBy scr 1 >> continue s
+        EvKey (KChar 'h') [] -> hScrollBy scr (-1) >> continue hs_
+        EvKey (KChar 'j') [] -> vScrollBy scr 1 >> continue hs_
+        EvKey (KChar 'k') [] -> vScrollBy scr (-1) >> continue hs_
+        EvKey (KChar 'l') [] -> hScrollBy scr 1 >> continue hs_
         EvKey KUp   []
           | Just hs' <- NonEmpty.nonEmpty hs ->
               continue hs'
         EvKey KDown []
-          | (_, _, t) : _ <- drop k zs ->
-              continue (NonEmpty.cons (children t, 0) s)
+          | (_, s, t) : _ <- drop k zs, zs@(_ : _) <- children s t ->
+              continue (NonEmpty.cons (zs, 0) hs_)
         EvKey KLeft  []
           | k > 0 ->
               continue ((zs, k - 1) :| hs)
         EvKey KRight []
           | k < length zs - 1 ->
               continue ((zs, k + 1) :| hs)
-        EvKey (KChar 'q') [] -> halt s
-        _ -> continue s
+        EvKey (KChar 'q') [] -> halt hs_
+        _ -> continue hs_
        where scr = viewportScroll main_window
-      _ -> continue s
+      _ -> continue hs_
   , appStartEvent = return
   , appAttrMap = const (attrMap defAttr [])
   }
 
-progress :: Int -> Either String s -> Tree_ s -> (Either String s, Tree_ s)
-progress 0 z t = (z, t)
-progress _ _ t@(Pure s) = (Right s, t)
-progress fuel z t@(Free f) = case f of
-  Tag s f -> progress (fuel - 1) (Right s) f
-  Pick _ -> (z, t)
-  Fail e -> (Left e, t)
+progress :: Int -> s -> Tree_ s -> (s, Tree_ s)
+progress 0 s t = (s, t)
+progress _ _ t@(Pure s) = (s, t)
+progress fuel s t@(Free f) = case f of
+  Tag s f -> progress (fuel - 1) s f
+  Pick _ _ -> (s, t)
+  Fail _ -> (s, t)
 
-children :: Tree_ s -> [(String, Either String s, Tree_ s)]
-children (Pure s) = []
-children (Free f) = case f of
-  Tag s f -> [name "Checkpoint" f]
-  Pick xfs -> [name ("Pick[" ++ show x ++ "]") f | (x, f) <- xfs]
+children :: s -> Tree_ s -> [(String, s, Tree_ s)]
+children _ (Pure s) = []
+children s (Free f) = case f of
+  Tag s f -> [name "Continue" f]
+  Pick d xfs -> [name ("Pick[" ++ d ++ "]" ++ ": " ++ show x) f | (x, f) <- xfs]
   Fail e -> []
   where
-    progress' = progress 10 (Left "Progress")
+    progress' = progress 10 s
     name n t = let (a, b) = progress' t in (n, a, b)

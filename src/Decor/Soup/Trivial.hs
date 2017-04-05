@@ -8,6 +8,7 @@ module Decor.Soup.Trivial where
 import Control.Applicative
 import Control.Comonad.Cofree
 import Control.Monad.Except
+import Control.Monad.Fail
 import Control.Monad.State.Strict
 import Data.Foldable
 
@@ -30,7 +31,10 @@ instance MonadFresh (M h) where
     let i = counter s in (i, s {counter = i+1})
 
 instance MonadSoup (M h) where
-  pick = M . lift . lift . fmap snd
+  pick _ = M . lift . lift . fmap snd
+
+instance MonadFail (M h) where
+  fail _ = M . lift . ExceptT . return $ Left ()
 
 runM :: KStore h => M h [K] -> S h -> ForkF (S h)
 runM = execStateT . unM . (>>= andKs)
