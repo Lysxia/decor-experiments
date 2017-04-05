@@ -71,7 +71,7 @@ instance MonadFresh M where
     return i
 
 instance MonadSoup M where
-  pick xs = liftF (Inst xs)
+  pick xs = liftF (Inst xs) >>= \x -> tag >> return x
 
 type S1 = S H1
 
@@ -121,7 +121,7 @@ k0 :: K1
 k0 = K1Type emptyCtx (DCId (-1)) (DCId (-2))
 
 unfoldH1 :: MonadChoice m => m ()
-unfoldH1 = forever (instantiateH1 >> reduceH1 >> tag)
+unfoldH1 = forever (instantiateH1 >> tag >> reduceH1 >> tag)
 
 type Tree_ s = Free (ChoiceF s) s
 
@@ -133,10 +133,14 @@ instantiateH1 = do
   ks <- use ksH1
   eqns <- use eqnsH1
   wrap . Inst $ do
-    (K1Type ctx t ty, ks) <- focus ks
+    (k1@(K1Type ctx t ty), ks') <- focus ks
     guard (Map.notMember t eqns)
-    return $
-      typeCheck ctx t ty >>= traverse_ andK
+    return $ do
+      ksH1 .= ks'
+      typeCheck ctx t ty >>= traverse andK >>= \ks1' -> do
+        let ks1 = concat ks1'
+        ksH1 %= (ks1 ++)
+        ksHistoryH1 %= Map.insert k1 ks1
 
 {-
   extractKType r = M $ do
@@ -148,8 +152,8 @@ instantiateH1 = do
     unM go
 -}
 
-andK :: MonadChoice m => K -> m ()
-andK = andKH1 >=> \ks -> ksH1 %= (ks ++)
+andK :: MonadChoice m => K -> m [K1]
+andK = andKH1 >=> \ks -> return ks
 
 andKH1 :: MonadChoice m => K -> m [K1]
 andKH1 (KEqDC t (RHSHead h)) = return [k1EqDC t h]

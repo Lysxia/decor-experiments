@@ -66,7 +66,10 @@ newtype DeBruijnC = DeBruijnC Integer
   deriving (Eq, Ord, Show, Num)
 
 newtype DCId = DCId Integer
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord)
+
+instance Show DCId where
+  show (DCId n) = "u" ++ show n
 
 newtype CoercionId = CoercionId Integer
   deriving (Eq, Ord, Show)
