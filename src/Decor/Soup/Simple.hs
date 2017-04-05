@@ -392,11 +392,26 @@ derivationH1 history = unfoldTree f k0
   where
     f k = (k, msum (Map.lookup k history))
 
-showK1 :: K1 -> String
-showK1 = undefined
+showK1 :: S1 -> K1 -> Maybe String
+showK1 s (K1Type ctx u v) =
+  Just (showCtx s ctx ++ "|-" ++ showDCHead s u ++ ":" ++ showDCHead s v)
+showK1 _ _ = Nothing
 
-showTree :: Tree K1 -> String
-showTree = drawTree . fmap showK1
+showCtx _ _ = "_"
+
+showDCHead s u = case Map.lookup u (s ^. eqnsH1) of
+  Just a -> showDCoreSoup a
+  Nothing -> show u
+
+joinTree :: Tree (Maybe a) -> Forest a
+joinTree (Node a ts) =
+  let ts' = ts >>= joinTree
+  in case a of
+    Just a -> [Node a ts']
+    Nothing -> ts'
+
+showTree :: S1 -> Tree K1 -> String
+showTree s = drawForest . joinTree . fmap (showK1 s)
 
 showCurrentDerivation :: S1 -> String
-showCurrentDerivation = showTree . currentDerivation
+showCurrentDerivation s = showTree s (currentDerivation s)
