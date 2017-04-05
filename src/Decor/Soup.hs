@@ -21,15 +21,11 @@ module Decor.Soup where
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Except
-import Control.Monad.State.Strict
 import Control.Monad.Writer
 
 import Control.Comonad.Cofree
 
-import Data.Foldable
-
-import Data.Map (Map)
-import qualified Data.Map as Map
+import Data.Maybe
 
 import Data.Bimap (Bimap)
 import qualified Data.Bimap as Bimap
@@ -185,6 +181,9 @@ cctx ctx = Ctx' (fromIntegral <$> [0 .. length (cVarCtx ctx)])
 pickVar :: MonadSoup m => Ctx -> m (DeBruijnV, DCId)
 pickVar ctx = pick (zip (DeBruijnV <$> [0 ..]) (varCtx ctx))
 
+lookupVar :: DeBruijnV -> Ctx -> Maybe DCId
+lookupVar (DeBruijnV n) ctx = listToMaybe $ drop (fromIntegral n) (varCtx ctx)
+
 insertVar :: DCId -> Ctx -> Ctx
 insertVar ty ctx = ctx { varCtx = ty : varCtx ctx }
 
@@ -195,50 +194,45 @@ alternate3 :: MonadSoup m => [a -> b -> c -> m d] -> a -> b -> c -> m d
 alternate3 fs a b c = pick fs >>= \f -> f a b c
 
 typeCheck :: MonadSoup m => Ctx -> DCId -> DCId -> m [K]
-typeCheck = alternate3
-  [ tcStar
-  , tcVar
-  , tcPi
-  , tcAbs
-  , tcApp
-  ]
+typeCheck ctx t tyT = pick
+  [ return Star
+  , pickVar ctx <&> \(x, _) -> Var x
+  , pick [Rel, Irr] >>= \rel -> freshes <&> \(tyA, tyB) -> Pi rel () tyA tyB
+  , pick [Rel, Irr] >>= \rel -> freshes <&> \(tyA, b) -> Abs rel () tyA b
+  , pick [Rel, Irr] >>= \rel -> freshes <&> \(b, a) -> App b a rel
+  ] >>= \h_ -> h_ >>= \h -> (kEqDC t (RHSHead h) :) <$> typeCheck' ctx tyT h
+  where
+    (<&>) :: Functor f => f a -> (a -> b) -> f b
+    (<&>) = flip fmap
 
-tcStar, tcVar, tcPi, tcAbs, tcApp, tcConv, tcCoPi,
-  tcCoAbs, tcCoApp
-  :: MonadSoup m => Ctx -> DCId -> DCId -> m [K]
-
-tcStar _ctx t tyT = do
+typeCheck' :: MonadSoup m => Ctx -> DCId -> DCore_ Soup -> m [K]
+typeCheck' _ctx tyT Star = do
   return
-    [ kEqDC t (RHSHead Star)
-    , kEqDC tyT (RHSHead Star)
+    [ kEqDC tyT (RHSHead Star)
     ]
 
-tcVar ctx t tyT = do
-  (x, ty) <- pickVar ctx
-  return
-    [ kEqDC t (RHSHead (Var x))
-    , kEqDC tyT (RHSId ty (asShift x + 1))
-    ]
+typeCheck' ctx tyT (Var x) = do
+  case lookupVar x ctx of
+    Nothing -> fail "Unbound variable"
+    Just ty ->
+      return
+        [ kEqDC tyT (RHSId ty (asShift x + 1))
+        ]
 
-tcPi ctx t tyStar = do
-  rel <- pick [Rel, Irr]
-  (tyA, tyB) <- freshes
+typeCheck' ctx tyStar (Pi _ () tyA tyB) = do
   let ctx' = insertVar tyA ctx
   return
-    [ kEqDC t (RHSHead (Pi rel () tyA tyB))
-    , kEqDC tyStar (RHSHead Star)
+    [ kEqDC tyStar (RHSHead Star)
     , KType ctx' tyB tyStar
     , KWF ctx'
     , K_ (KType ctx tyA tyStar)
     ]
 
-tcAbs ctx t tyT = do
-  rel <- pick [Rel, Irr]
-  (tyA, b, tyB, tyStar) <- freshes
+typeCheck' ctx tyT (Abs rel () tyA b) = do
+  (tyB, tyStar) <- freshes
   let ctx' = insertVar tyA ctx
   return
-    [ kEqDC t (RHSHead (Abs rel () tyA b))
-    , kEqDC tyT (RHSHead (Pi rel () tyA tyB))
+    [ kEqDC tyT (RHSHead (Pi rel () tyA tyB))
     , KType ctx' b tyB
     , KWF ctx'
     , KRel rel b
@@ -246,54 +240,47 @@ tcAbs ctx t tyT = do
     , K_ (KType ctx tyA tyStar)
     ]
 
-tcApp ctx t tyT = do
-  rel <- pick [Rel, Irr]
-  (b, a, tyA, ty', tyB) <- freshes
+typeCheck' ctx tyT (App b a rel) = do
+  (tyA, ty', tyB) <- freshes
   return
-    [ kEqDC t   (RHSHead (App b a rel))
-    , kEqDC tyB (RHSHead (Pi rel () tyA ty'))
+    [ kEqDC tyB (RHSHead (Pi rel () tyA ty'))
     , kEqDC tyT (RHSSub a ty')
     , KType ctx b tyB
     , KType ctx a tyA
     ]
 
-tcConv ctx t tyB = do
-  (a, g, tyA, tyStar) <- freshes
+typeCheck' ctx tyB (Coerce a g) = do
+  (tyA, tyStar) <- freshes
   return
-    [ kEqDC t (RHSHead (Coerce a g))
-    , kEqDC tyStar (RHSHead Star)
+    [ kEqDC tyStar (RHSHead Star)
     , KType ctx tyB tyStar
     , KType ctx a tyA
     , KTypeC ctx (cctx ctx) g (tyA :~: tyB)
     ]
 
-tcCoPi ctx t tyStar = do
-  (phi, tyB) <- freshes
+typeCheck' ctx tyStar (CoPi () phi tyB) = do
   let ctx' = insertCVar phi ctx
   return
-    [ kEqDC t (RHSHead (CoPi () phi tyB))
-    , kEqDC tyStar (RHSHead Star)
+    [ kEqDC tyStar (RHSHead Star)
     , KType ctx' tyB tyStar
     , KWF ctx'
     , K_ (KOK ctx phi)
     ]
 
-tcCoAbs ctx t tyT = do
-  (phi, b, tyB) <- freshes
+typeCheck' ctx tyT (CoAbs () phi b) = do
+  tyB <- fresh
   let ctx' = insertCVar phi ctx
   return
-    [ kEqDC t   (RHSHead (CoAbs () phi b))
-    , kEqDC tyT (RHSHead (CoPi () phi tyB))
+    [ kEqDC tyT (RHSHead (CoPi () phi tyB))
     , KType ctx' b tyB
     , KWF ctx'
     , K_ (KOK ctx phi)
     ]
 
-tcCoApp ctx t tyT = do
-  (a, g, phi, tyB, ty') <- freshes
+typeCheck' ctx tyT (CoApp a g) = do
+  (phi, tyB, ty') <- freshes
   return
-    [ kEqDC t   (RHSHead (CoApp a g))
-    , kEqDC ty' (RHSHead (CoPi () phi tyB))
+    [ kEqDC ty' (RHSHead (CoPi () phi tyB))
     , kEqDC tyT (RHSSubC g tyB)
     , KType ctx a ty'
     , KTypeC ctx (cctx ctx) g phi

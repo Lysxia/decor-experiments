@@ -153,16 +153,16 @@ instantiateH1 = do
 -}
 
 andK :: MonadChoice m => K -> m [K1]
-andK = andKH1 >=> \ks -> return ks
+andK k = return [toK1 k]
 
-andKH1 :: MonadChoice m => K -> m [K1]
-andKH1 (KEqDC t (RHSHead h)) = return [k1EqDC t h]
-andKH1 (KEqDC t (RHSId u n)) = return [k1EqId t u n 0]
-andKH1 (KEqDC t (RHSSub u v)) = return [K1Sub t u v 0]
-andKH1 (KType ctx t u) = return [K1Type ctx t u]
-andKH1 (KRel rel u) = return [K1Rel rel 0 u]
-andKH1 (KWF ctx) = return [K1WF ctx]
-andKH1 (K_ k) = andKH1 k
+toK1 :: K -> K1
+toK1 (KEqDC t (RHSHead h)) = k1EqDC t h
+toK1 (KEqDC t (RHSId u n)) = k1EqId t u n 0
+toK1 (KEqDC t (RHSSub u v)) = K1Sub t u v 0
+toK1 (KType ctx t u) = K1Type ctx t u
+toK1 (KRel rel u) = K1Rel rel 0 u
+toK1 (KWF ctx) = K1WF ctx
+toK1 (K_ k) = toK1 k
 
 -- eqHeadH1 :: DCId -> DCore_ Soup -> Shift -> Shift -> M' H1 [K1]
 -- eqHeadH1 t h = do
@@ -287,6 +287,11 @@ reduceAtomH1 k@(K1Sub u v w n') = do
         eqnsH1 %= Map.insert v h'
         return ks
       Nothing -> return [k]
+reduceAtomH1 k@(K1Type ctx u v) = do
+  eqns <- use eqnsH1
+  case Map.lookup u eqns of
+    Nothing -> return [k]
+    Just h -> (fmap . fmap) toK1 (typeCheck' ctx v h)
 reduceAtomH1 k = return [k]
 
 
