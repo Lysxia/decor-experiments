@@ -319,7 +319,7 @@ focus :: [a] -> [(a, [a])]
 focus = focus' []
   where
     focus' _ [] = []
-    focus' aux (a : as) = (a, aux) : focus' (a : aux) as
+    focus' aux (a : as) = (a, aux ++ as) : focus' (a : aux) as
 
 size :: Foldable f => Cofree f a -> Integer
 size = getSum . size'
@@ -334,11 +334,17 @@ instance Lns "ks" (S h) h where
 showDCoreSoup :: DCore_ Soup -> String
 showDCoreSoup t = case t of
   Star -> "*"
-  Var (DeBruijnV x) -> "i" ++ show x
+  Var n -> showDeBruijnV n
   App t u rel -> show t ++ " " ++ show u ++ sRel rel
   Pi rel () u v -> "Π" ++ sRel rel ++ " " ++ show u ++ " -> " ++ show v
   Abs rel () u v -> "λ" ++ sRel rel ++ " " ++ show u ++ " . " ++ show v
 
+showDeBruijnV :: DeBruijnV -> String
+showDeBruijnV (DeBruijnV x) = "i" ++ show x
+
 sRel :: Rel -> String
 sRel Rel = "+"
 sRel Irr = "-"
+
+parens :: String -> String
+parens s = "(" ++ s ++ ")"

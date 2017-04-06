@@ -20,6 +20,7 @@ import Control.Monad.Free
 import Control.Monad.State.Strict hiding (fail)
 import Lens.Micro.Platform
 import Data.Foldable
+import Data.List (intercalate)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe
@@ -92,8 +93,8 @@ data K1
     -- ^ @u = v[w^n/n]@ substitute
 
   | K1Type Ctx DCId DCId
-  | K1Rel Rel DeBruijnV DCId
-  | K1WF Ctx
+  | K1Irr DeBruijnV DCId
+  | K1_ K1
   deriving (Eq, Ord, Show, Generic)
 
 data IdOrDC = Id_ DCId | DC_ (DCore_ Soup)
@@ -113,6 +114,12 @@ eqnsH1 = l @"ks" . l @"eqns"
 
 ksHistoryH1 :: Lens' (S H1) (Map K1 [K1])
 ksHistoryH1 = l @"ks" . l @"history"
+
+updateHistory :: MonadChoice m => K1 -> [K1] -> m ()
+updateHistory k ks = ksHistoryH1 %= Map.insert (strip k) (fmap strip ks)
+  where
+    strip (K1_ k) = strip k
+    strip k = k
 
 initS1 :: S1
 initS1 = S 0 (H1 Map.empty [k0] Map.empty)
@@ -162,7 +169,6 @@ everywhere p t =
 instantiateH1 :: MonadChoice m => m Bool
 instantiateH1 = do
   ks <- use ksH1
-  eqns <- use eqnsH1
   picks <- for (focus ks) $ \(k1, ks') ->
     case k1 of
       K1Type ctx t ty -> do
@@ -174,11 +180,16 @@ instantiateH1 = do
               typeCheck ctx t ty >>= traverse andK >>= \ks1' -> do
                 let ks1 = concat ks1'
                 ksH1 %= (ks1 ++)
-                ksHistoryH1 %= Map.insert k1 ks1
+                updateHistory k1 ks1
           )
       _ -> return Nothing
   case catMaybes picks of
-    [] -> return True
+    [] ->
+      if null [() | K1_ _ <- ks] then
+        return True
+      else do
+        ksH1 %= fmap (\k -> case k of K1_ k -> k ; k -> k)
+        instantiateH1
     picks -> do
       join $ pick "Type" picks
       return False
@@ -194,16 +205,17 @@ instantiateH1 = do
 -}
 
 andK :: MonadChoice m => K -> m [K1]
-andK k = return [toK1 k]
+andK k = return (toK1 k)
 
-toK1 :: K -> K1
-toK1 (KEqDC t (RHSHead h)) = k1EqDC t h
-toK1 (KEqDC t (RHSId u n)) = k1EqId t u n (toEnum 0)
-toK1 (KEqDC t (RHSSub u v)) = K1Sub t u v (toEnum 0)
-toK1 (KType ctx t u) = K1Type ctx t u
-toK1 (KRel rel u) = K1Rel rel (toEnum 0) u
-toK1 (KWF ctx) = K1WF ctx
-toK1 (K_ k) = toK1 k
+toK1 :: K -> [K1]
+toK1 (KEqDC t (RHSHead h)) = [k1EqDC t h]
+toK1 (KEqDC t (RHSId u n)) = [k1EqId t u n (toEnum 0)]
+toK1 (KEqDC t (RHSSub u v)) = [K1Sub t u v (toEnum 0)]
+toK1 (KType ctx t u) = [K1Type ctx t u]
+toK1 (KRel Rel _) = []
+toK1 (KRel Irr u) = [K1Irr (toEnum 0) u]
+toK1 (KWF _) = []  -- Handled via redundant constraints
+toK1 (K_ k) = fmap K1_ (toK1 k)
 
 -- eqHeadH1 :: DCId -> DCore_ Soup -> Shift -> Shift -> M' H1 [K1]
 -- eqHeadH1 t h = do
@@ -271,12 +283,12 @@ refresh h n m k = case h of
     return (App b' a' rel, [k b b' n m, k a a' n m])
 
 reduceH1 :: MonadChoice m => m ()
-reduceH1 = tag >> use ksH1 >>= reduceH1'
+reduceH1 = use ksH1 >>= reduceH1'
 
 reduceH1' :: MonadChoice m => [K1] -> m ()
 reduceH1' = loop
   where
-    loop ks = do
+    loop ks = tag >> do
       ks' <- fmap concat $ traverse reduceAtomH1_ ks
       if ks /= ks' then
         loop ks'
@@ -289,7 +301,7 @@ reduceAtomH1_ k = do
   case ks of
     [k'] | k == k' -> return ks
     _ -> do
-      ksHistoryH1 %= Map.insert k ks
+      updateHistory k ks
       return ks
 
 reduceAtomH1 :: MonadChoice m => K1 -> m [K1]
@@ -332,9 +344,22 @@ reduceAtomH1 k@(K1Type ctx u v) = do
   eqns <- use eqnsH1
   case Map.lookup u eqns of
     Nothing -> return [k]
-    Just h -> (fmap . fmap) toK1 (typeCheck' ctx v h)
-reduceAtomH1 k = return [k]
+    Just h -> fmap (>>= toK1) (typeCheck' ctx v h)
+reduceAtomH1 k@(K1Irr n u) = do
+  eqns <- use eqnsH1
+  case Map.lookup u eqns of
+    Nothing -> return [k]
+    Just h -> checkIrr n h
+reduceAtomH1 (K1_ k) = (fmap . fmap) K1_ (reduceAtomH1 k)
 
+checkIrr :: MonadChoice m => DeBruijnV -> DCore_ Soup -> m [K1]
+checkIrr n h = case h of
+  Star -> return []
+  Var m | n == m -> fail "Irrelevant"
+  Var _ -> return []
+  Pi _rel () tyA tyB -> return [K1Irr n tyA, K1Irr (shift n 1) tyB]
+  Abs _rel () tyA b -> return [K1Irr n tyA, K1Irr (shift n 1) b]
+  App b a _rel -> return [K1Irr n b, K1Irr n a]
 
 -- DCId DCId Shift Shift           -- ^ @u = v^n_m@ shift all indices >= m by n
 --   | K1Sub DCId DCId DeBruijnV DCId       -- ^ @u = v[w^n/n]@ substitute
@@ -448,10 +473,15 @@ showK1 s (K1Type ctx u v) =
     ( showCtx s ctx ++
       " |- " ++ showDCHead s u ((show u ++ " = ") ++) ++
       " : " ++ showDCHead s v (++ (" = " ++ show v)))
+showK1 s (K1_ k) = fmap parens (showK1 s k)
 showK1 _ _ = Nothing
 
-showCtx _ _ = "_"
+showCtx :: S1 -> Ctx -> String
+showCtx _ ctx =
+  intercalate ","
+    [showDeBruijnV n ++ ":" ++ show u | (n, u) <- zip [DeBruijnV 0 ..] (varCtx ctx)]
 
+showDCHead :: S1 -> DCId -> (String -> String) -> String
 showDCHead s u cont = case Map.lookup u (s ^. eqnsH1) of
   Just a -> cont (showDCoreSoup a)
   Nothing -> show u
@@ -473,4 +503,4 @@ showRoot :: Free (ChoiceF s) a -> String
 showRoot (Free Tag{}) = "Continue"
 showRoot (Free (Fail e)) = "Fail: " ++ e
 showRoot (Free (Pick d _)) = "Pick[" ++ d ++ "]"
-showRoot (Pure a) = "Done"
+showRoot (Pure _) = "Done"

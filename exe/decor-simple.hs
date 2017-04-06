@@ -25,8 +25,8 @@ level zs k r cont = case drop k zs of
 app :: App (NonEmpty (Zs, Int)) () String
 app = App
   { appDraw = \history@((zs, k) :| _) ->
-      [ level zs k (str "[]") $ \key s t ->
-          viewport main_window Both
+      level zs k [str "[]"] $ \key s t ->
+        [ viewport main_window Both
             (str (showCurrentDerivation s))
           <+>
           ( str (showRoot t)
@@ -38,7 +38,8 @@ app = App
               emptyWidget
               history
           )
-      ]
+          <=> (vLimit 5 . str . show . ks1 . constraints $ s)
+        ]
   , appChooseCursor = \_ _ -> Nothing
   , appHandleEvent = \hs_@((zs, k) :| hs) e -> case e of
       VtyEvent e -> case e of
