@@ -246,7 +246,7 @@ typeCheck' ctx tyT (App b a rel) = do
   (tyA, ty', tyB) <- freshes
   return
     [ kEqDC tyB (RHSHead (Pi rel () tyA ty'))
-    , kEqDC tyT (RHSSub a ty')
+    , kEqDC tyT (RHSSub ty' a)
     , KType ctx b tyB
     , KType ctx a tyA
     ]

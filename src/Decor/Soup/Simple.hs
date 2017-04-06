@@ -501,7 +501,8 @@ showCurrentDerivation :: S1 -> String
 showCurrentDerivation s = showTree s (currentDerivation s)
 
 showRoot :: Free (ChoiceF s) a -> String
-showRoot (Free Tag{}) = "Continue"
+showRoot (Free (Tag _ (Free (Tag _ _)))) = "Continue"
+showRoot (Free (Tag _ f)) = showRoot f
 showRoot (Free (Fail e)) = "Fail: " ++ e
 showRoot (Free (Pick d _)) = "Pick[" ++ d ++ "]"
 showRoot (Pure _) = "Done"

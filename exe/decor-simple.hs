@@ -43,9 +43,10 @@ search :: Options -> IO ()
 search opts = do
   let fuel = 100
       file = _file opts
-  m <- newMVar (fuel, initS1)
+  m <- newEmptyMVar
   result <- newEmptyMVar
-  tid <- forkIO $ runLogS m (randomSearch fuel) >>= putMVar result
+  tid <- forkIO $ mask $ \restore ->
+    restore (runLogS m (randomSearch fuel)) >>= putMVar result
   let loop xs 0 = do
         killThread tid
         return xs
