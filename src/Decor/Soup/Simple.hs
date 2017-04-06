@@ -19,6 +19,7 @@ import Control.Monad.Fail
 import Control.Monad.Free
 import Control.Monad.State.Strict hiding (fail)
 import Lens.Micro.Platform
+import Data.Char (isSpace)
 import Data.Foldable
 import Data.List (intercalate)
 import Data.Map (Map)
@@ -504,3 +505,26 @@ showRoot (Free Tag{}) = "Continue"
 showRoot (Free (Fail e)) = "Fail: " ++ e
 showRoot (Free (Pick d _)) = "Pick[" ++ d ++ "]"
 showRoot (Pure _) = "Done"
+
+showSolution :: S1 -> String
+showSolution s =
+  case k0 of
+    K1Type ctx u v ->
+      showCtx s ctx ++ " |- " ++ showDCTerm s 0 u ++ " : " ++ showDCTerm s 0 v
+    _ -> "assert false"
+
+showDCTerm :: S1 -> Int -> DCId -> String
+showDCTerm s n u = ("\n" ++) . postProcess 0 [0] $ showDCTerm' s n u
+
+postProcess :: Int -> [Int] -> String -> String
+postProcess _ u@(n : _) ('\n' : s) =
+  '\n' : replicate n ' ' ++ postProcess n u (dropWhile isSpace s)
+postProcess n u ('(' : s) = '(' : postProcess (n+1) (n : u) s
+postProcess n ~(_ : u) (')' : s) = ')' : postProcess (n+1) u s
+postProcess n u (c : s) = c : postProcess (n+1) u s
+postProcess _ _ [] = []
+
+showDCTerm' :: S1 -> Int -> DCId -> String
+showDCTerm' s n u = case Map.lookup u (s ^. eqnsH1) of
+  Just h -> showDCoreSoup_ (showDCTerm' s) n h ++ "\n"
+  Nothing -> show u ++ "\n"

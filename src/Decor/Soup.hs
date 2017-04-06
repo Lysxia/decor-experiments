@@ -331,20 +331,33 @@ class Lns (n :: Symbol) s a | n s -> a where
 instance Lns "ks" (S h) h where
   l f s = fmap (\h -> s { constraints = h }) (f (constraints s))
 
-showDCoreSoup :: DCore_ Soup -> String
-showDCoreSoup t = case t of
+showDCoreSoup_ :: (Int -> DCId -> String) -> Int -> DCore_ Soup -> String
+showDCoreSoup_ showDCId n t = case t of
   Star -> "*"
   Var n -> showDeBruijnV n
-  App t u rel -> show t ++ " " ++ show u ++ sRel rel
-  Pi rel () u v -> "Π" ++ sRel rel ++ " " ++ show u ++ " -> " ++ show v
-  Abs rel () u v -> "λ" ++ sRel rel ++ " " ++ show u ++ " . " ++ show v
+  App t u rel ->
+    parensIf (n >= 11) $
+      showDCId 10 t ++ " " ++ showRel rel ++ " " ++ showDCId 11 u
+  Pi rel () u v ->
+    parensIf (n >= 0) $
+      "Π" ++ showRel rel ++ " " ++ showDCId 0 u ++ " -> " ++ showDCId (-1) v
+  Abs rel () u v ->
+    parensIf (n >= 0) $
+      "λ" ++ showRel rel ++ " " ++ showDCId 0 u ++ " . " ++ showDCId (-1) v
+
+showDCoreSoup :: DCore_ Soup -> String
+showDCoreSoup = showDCoreSoup_ (const show) 0
+
+parensIf :: Bool -> String -> String
+parensIf True s = parens s
+parensIf False s = s
 
 showDeBruijnV :: DeBruijnV -> String
 showDeBruijnV (DeBruijnV x) = "i" ++ show x
 
-sRel :: Rel -> String
-sRel Rel = "+"
-sRel Irr = "-"
+showRel :: Rel -> String
+showRel Rel = "+"
+showRel Irr = "-"
 
 parens :: String -> String
 parens s = "(" ++ s ++ ")"
