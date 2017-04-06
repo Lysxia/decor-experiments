@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 import Brick
-import Graphics.Vty (Key(..), Event(..), defAttr)
+import Graphics.Vty (Key(..), Event(..), Modifier(..), defAttr)
 
 import Control.Concurrent
 import Control.Exception
@@ -100,6 +100,7 @@ runApp opts = do
 type Zs = [(String, S1, Tree_ S1)]
 
 main_window = "main"
+k_window = "k"
 
 level :: Zs -> Int -> r -> (String -> S1 -> Tree_ S1 -> r) -> r
 level zs k r cont = case drop k zs of
@@ -122,7 +123,10 @@ app = App
               emptyWidget
               history
           )
-          <=> (vLimit 5 . str . show . ks1 . constraints $ s)
+          <=>
+          ( vLimit 5 . viewport k_window Vertical .
+              str . unlines . fmap show . ks1 . constraints $ s
+          )
         ]
   , appChooseCursor = \_ _ -> Nothing
   , appHandleEvent = \hs_@((zs, k) :| hs) e -> case e of
@@ -131,6 +135,10 @@ app = App
         EvKey (KChar 'j') [] -> vScrollBy scr 1 >> continue hs_
         EvKey (KChar 'k') [] -> vScrollBy scr (-1) >> continue hs_
         EvKey (KChar 'l') [] -> hScrollBy scr 1 >> continue hs_
+        EvKey (KChar 'y') [] -> hScrollBy scrK (-1) >> continue hs_
+        EvKey (KChar 'u') [] -> vScrollBy scrK 1 >> continue hs_
+        EvKey (KChar 'i') [] -> vScrollBy scrK (-1) >> continue hs_
+        EvKey (KChar 'o') [] -> hScrollBy scrK 1 >> continue hs_
         EvKey KUp   []
           | Just hs' <- NonEmpty.nonEmpty hs ->
               continue hs'
@@ -145,7 +153,9 @@ app = App
               continue ((zs, k + 1) :| hs)
         EvKey (KChar 'q') [] -> halt hs_
         _ -> continue hs_
-       where scr = viewportScroll main_window
+       where
+         scr = viewportScroll main_window
+         scrK = viewportScroll k_window
       _ -> continue hs_
   , appStartEvent = return
   , appAttrMap = const (attrMap defAttr [])
