@@ -39,7 +39,8 @@ randomSearch' fuel s ok fail t = handle h $ case t of
     Pick x ys -> randomPick fuel x ys (length ys)
   where
 
-    h UserInterrupt = fail 0 "KILL" s
+    h ThreadKilled = fail 0 "KILL" s
+    h UserInterrupt = fail 0 "INT" s
     h e = throwM e
 
     randomPick fuel x _ 0 = fail (fuel - 1) (show x) s
