@@ -291,10 +291,11 @@ reduceH1' = loop
   where
     loop ks = tag >> do
       ks' <- fmap concat $ traverse reduceAtomH1_ ks
+      ksH1 .= ks'
       if ks /= ks' then
         loop ks'
       else
-        ksH1 .= ks'
+        return ()
 
 reduceAtomH1_ :: MonadChoice m => K1 -> m [K1]
 reduceAtomH1_ k = do
