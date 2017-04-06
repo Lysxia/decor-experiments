@@ -44,42 +44,43 @@ search opts = do
   let fuel = 100
       file = _file opts
   m <- newEmptyMVar
+  log <- newMVar []
   result <- newEmptyMVar
   tid <- forkIO $ mask $ \restore ->
     restore (runLogS m (randomSearch fuel)) >>= putMVar result
-  let loop xs 0 = do
-        killThread tid
-        return xs
-      loop xs n = do
+  let loop 0 = killThread tid
+      loop n = do
         threadDelay (10 ^ 6)
         x <- tryTakeMVar m
-        b <- isEmptyMVar result
-        if b then do
-          loop (x : xs) (n - 1)
-        else
-          return xs
-  xs <- loop [] (fromMaybe 10 (_secs opts))
-  let getResult = do
-        s <- takeMVar result
-        case s of
-          Right s -> do
-            putStrLn "SUCCESS\n"
-            putStrLn (showSolution s)
-            writeFile file $ showCurrentDerivation s
-            putStrLn $ "Derivation written to " ++ file
-          Left (e, s) -> do
-            writeFile file . unlines $
-              [ "FAIL"
-              , e
-              , showCurrentDerivation s
-              ] ++ history
-            putStrLn $ "Search state written to " ++ file
-      history = do
-        Just (fuel, s) <- xs
-        [replicate 30 '=', show fuel, showCurrentDerivation s]
-  catch getResult $ \BlockedIndefinitelyOnMVar -> do
-    writeFile file . unlines $ history
-    putStrLn $ "Search sample written to " ++ file
+        modifyMVar_ log (return . (x :))
+        loop (n - 1)
+  tid2 <- forkIO $ loop (fromMaybe 10 (_secs opts))
+  let history = do
+        xs <- readMVar log
+        return $ do
+          Just (fuel, s) <- xs
+          [replicate 30 '=', show fuel, showCurrentDerivation s]
+  let h BlockedIndefinitelyOnMVar = do
+        writeFile file . unlines =<< history
+        putStrLn $ "Search sample written to " ++ file
+  handle h $ do
+    s <- takeMVar result
+    xs <- readMVar log
+    killThread tid2
+    case s of
+      Right s -> do
+        putStrLn "SUCCESS\n"
+        putStrLn (showSolution s)
+        writeFile file $ showCurrentDerivation s
+        putStrLn $ "Derivation written to " ++ file
+      Left (e, s) -> do
+        history <- history
+        writeFile file . unlines $
+          [ "FAIL"
+          , e
+          , showCurrentDerivation s
+          ] ++ history
+        putStrLn $ "Search state written to " ++ file
 
 runApp :: Options -> IO ()
 runApp opts = do

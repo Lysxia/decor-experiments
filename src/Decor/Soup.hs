@@ -340,10 +340,10 @@ showDCoreSoup_ showDCId n t = case t of
       showDCId 10 t ++ " " ++ showRel rel ++ " " ++ showDCId 11 u
   Pi rel () u v ->
     parensIf (n >= 0) $
-      "Π" ++ showRel rel ++ " " ++ showDCId 0 u ++ " -> " ++ showDCId (-1) v
+      "Π" ++ showRel rel ++ " " ++ showDCId 11 u ++ " -> " ++ showDCId (-1) v
   Abs rel () u v ->
     parensIf (n >= 0) $
-      "λ" ++ showRel rel ++ " " ++ showDCId 0 u ++ " . " ++ showDCId (-1) v
+      "λ" ++ showRel rel ++ " " ++ showDCId 11 u ++ " . " ++ showDCId (-1) v
 
 showDCoreSoup :: DCore_ Soup -> String
 showDCoreSoup = showDCoreSoup_ (const show) 0
