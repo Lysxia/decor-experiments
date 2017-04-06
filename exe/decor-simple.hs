@@ -20,10 +20,14 @@ import Decor.Soup
 import Decor.Soup.Simple
 import Decor.Soup.SimpleRandom
 
-data Options = Options
+data Options
+  = Gen
   { _out :: Maybe String
-  , _gen :: Bool
   , _secs :: Maybe Int
+  , _fuel :: Maybe Int
+  }
+  | RunApp
+  { _out :: Maybe String
   } deriving Generic
 
 _file :: Options -> String
@@ -34,14 +38,13 @@ instance ParseRecord Options where
 
 main = do
   opts <- getRecord "decor"
-  if _gen opts then
-    search opts
-  else
-    runApp opts
+  case opts of
+    Gen{} -> search opts
+    RunApp{} -> runApp opts
 
 search :: Options -> IO ()
 search opts = do
-  let fuel = 100
+  let fuel = fromMaybe 100 (_fuel opts)
       file = _file opts
   m <- newEmptyMVar
   log <- newMVar []
