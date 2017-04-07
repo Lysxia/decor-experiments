@@ -134,12 +134,16 @@ runApp opts = do
     Nothing -> return ()
     Just file ->
       level zs k (return ()) $ \_ s _ -> do
-        writeFile file $ showCurrentDerivation s
+        writeFile file . unlines $
+          [ showSolution s
+          , showCurrentDerivation s
+          ]
         putStrLn $ "Derivation written to " ++ file
 
 type Zs = [(String, S1, Tree_ S1)]
 
 main_window = "main"
+e_window = "e"
 k_window = "k"
 
 level :: Zs -> Int -> r -> (String -> S1 -> Tree_ S1 -> r) -> r
@@ -152,7 +156,10 @@ app = App
   { appDraw = \history@((zs, k) :| _) ->
       level zs k [str "[]"] $ \key s t ->
         [ viewport main_window Both
-            (str (showCurrentDerivation s))
+            ( str . unlines $
+                [ showSolution s
+                , showCurrentDerivation s
+                ])
           <+>
           ( str (showRoot t)
             <=>
@@ -165,11 +172,13 @@ app = App
           )
           <=>
           ( vLimit 5 $
-              ( viewport k_window Both $
-                  (str . unlines . fmap show . Map.toList . eqns . constraints) s
-                  <+>
-                  (str . unlines . fmap show . ks1 . constraints) s
-              )
+              ( viewport e_window Both .
+                str . unlines . fmap show . Map.toList . eqns . constraints
+              ) s
+              <+>
+              ( viewport k_window Both .
+                str . unlines . fmap show . ks1 . constraints
+              ) s
           )
         ]
   , appChooseCursor = \_ _ -> Nothing
@@ -179,10 +188,17 @@ app = App
         EvKey (KChar 'j') [] -> vScrollBy scr 1 >> continue hs_
         EvKey (KChar 'k') [] -> vScrollBy scr (-1) >> continue hs_
         EvKey (KChar 'l') [] -> hScrollBy scr 1 >> continue hs_
+
         EvKey (KChar 'y') [] -> hScrollBy scrK (-1) >> continue hs_
         EvKey (KChar 'u') [] -> vScrollBy scrK 1 >> continue hs_
         EvKey (KChar 'i') [] -> vScrollBy scrK (-1) >> continue hs_
         EvKey (KChar 'o') [] -> hScrollBy scrK 1 >> continue hs_
+
+        EvKey (KChar 'Y') [] -> hScrollBy scrE (-1) >> continue hs_
+        EvKey (KChar 'U') [] -> vScrollBy scrE 1 >> continue hs_
+        EvKey (KChar 'I') [] -> vScrollBy scrE (-1) >> continue hs_
+        EvKey (KChar 'O') [] -> hScrollBy scrE 1 >> continue hs_
+
         EvKey KUp   []
           | Just hs' <- NonEmpty.nonEmpty hs ->
               continue hs'
@@ -200,6 +216,7 @@ app = App
        where
          scr = viewportScroll main_window
          scrK = viewportScroll k_window
+         scrE = viewportScroll e_window
       _ -> continue hs_
   , appStartEvent = return
   , appAttrMap = const (attrMap defAttr [])

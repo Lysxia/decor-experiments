@@ -133,12 +133,16 @@ unfoldH1 = tag >> instantiateH1 >>= \done ->
   if done then
     get
   else
-    reduceH1 >> unfoldH1 >>= \s -> boringCheck s >> return s
+    reduceH1 >> unfoldH1 -- >>= \s -> boringCheck s >> return s
 
 type Tree_ s = Free (ChoiceF s) s
 
 treeH1 :: Tree_ S1
-treeH1 = (quickPrune 3 . collapseTags 10 . runM) unfoldH1
+treeH1 =
+  quickPrune 3 .
+  collapseTags 10 .
+  runM $
+  unfoldH1
 
 collapseTags :: Int -> Free (ChoiceF s) a -> Free (ChoiceF s) a
 collapseTags fuel = everywhere (collapse fuel)
