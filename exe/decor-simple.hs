@@ -9,6 +9,7 @@ import Control.Exception
 import Control.Monad
 import Control.Monad.Free
 import Data.Either
+import Data.Foldable
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.Maybe (fromMaybe)
 import Options.Generic
@@ -82,7 +83,6 @@ streamWith n (Stream continue) h = do
 search :: Options -> IO ()
 search opts = do
   let fuel = fromMaybe 100 (_fuel opts)
-      file = _file opts
   m <- newEmptyMVar
   log <- newMVar []
   result <- newEmptyMVar
@@ -100,9 +100,10 @@ search opts = do
         return $ do
           Just (fuel, s) <- xs
           [replicate 30 '=', show fuel, showCurrentDerivation s]
-  let h BlockedIndefinitelyOnMVar = do
-        writeFile file . unlines =<< history
-        putStrLn $ "Search sample written to " ++ file
+  let h BlockedIndefinitelyOnMVar =
+        for_ (_out opts) $ \file -> do
+          writeFile file . unlines =<< history
+          putStrLn $ "Search sample written to " ++ file
   handle h $ do
     s <- takeMVar result
     xs <- readMVar log
@@ -111,16 +112,18 @@ search opts = do
       Right s -> do
         putStrLn "SUCCESS\n"
         putStrLn (showSolution s)
-        writeFile file $ showCurrentDerivation s
-        putStrLn $ "Derivation written to " ++ file
-      Left (e, s) -> do
-        history <- history
-        writeFile file . unlines $
-          [ "FAIL"
-          , e
-          , showCurrentDerivation s
-          ] ++ history
-        putStrLn $ "Search state written to " ++ file
+        for_ (_out opts) $ \file -> do
+          writeFile file $ showCurrentDerivation s
+          putStrLn $ "Derivation written to " ++ file
+      Left (e, s) ->
+        for_ (_out opts) $ \file -> do
+          history <- history
+          writeFile file . unlines $
+            [ "FAIL"
+            , e
+            , showCurrentDerivation s
+            ] ++ history
+          putStrLn $ "Search state written to " ++ file
 
 runApp :: Options -> IO ()
 runApp opts = do
