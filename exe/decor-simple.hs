@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 import Brick
@@ -47,12 +48,13 @@ instance ParseRecord Options where
 
 main = do
   opts <- getRecord "decor"
+  let ?params = defaultParams
   case opts of
     Gen{} -> search opts
     RunApp{} -> runApp opts
     Streaming{} -> stream opts
 
-stream :: Options -> IO ()
+stream :: WithParams => Options -> IO ()
 stream opts = do
   let width = fromMaybe 100 (_width opts)
       stream = streamingSearch width
@@ -70,7 +72,7 @@ stream opts = do
       threadDelay (secs * 10^6)
       killThread tid
 
-streamWith :: Maybe Int -> Stream IO S1 -> Handle -> IO ()
+streamWith :: WithParams => Maybe Int -> Stream IO S1 -> Handle -> IO ()
 streamWith (Just 0) _ _ = return ()
 streamWith n (Stream continue) h = do
   x <- continue
@@ -80,7 +82,7 @@ streamWith n (Stream continue) h = do
       hPutStrLn h (showSolution s)
       streamWith (fmap (subtract 1) n) continue h
 
-search :: Options -> IO ()
+search :: WithParams => Options -> IO ()
 search opts = do
   let fuel = fromMaybe 100 (_fuel opts)
   m <- newEmptyMVar
@@ -125,7 +127,7 @@ search opts = do
             ] ++ history
           putStrLn $ "Search state written to " ++ file
 
-runApp :: Options -> IO ()
+runApp :: WithParams => Options -> IO ()
 runApp opts = do
   ((zs, k) :| _) <- defaultMain
     app
@@ -151,7 +153,7 @@ level zs k r cont = case drop k zs of
   (key, s, t) : _ -> cont key s t
   _ -> r
 
-app :: App (NonEmpty (Zs, Int)) () String
+app :: WithParams => App (NonEmpty (Zs, Int)) () String
 app = App
   { appDraw = \history@((zs, k) :| _) ->
       level zs k [str "[]"] $ \key s t ->
@@ -173,11 +175,11 @@ app = App
           <=>
           ( vLimit 5 $
               ( viewport e_window Both .
-                str . unlines . fmap show . Map.toList . eqns . constraints
+                str . unlines . fmap showEqn . Map.toList . eqns . constraints
               ) s
               <+>
               ( viewport k_window Both .
-                str . unlines . fmap show . ks1 . constraints
+                str . unlines . fmap (fromMaybe <$> show <*> showK1 s) . ks1 . constraints
               ) s
           )
         ]

@@ -6,6 +6,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE StandaloneDeriving #-}
@@ -128,7 +129,7 @@ initS1 = S 0 (H1 Map.empty [k0] Map.empty)
 k0 :: K1
 k0 = K1Type emptyCtx (DCId (-1)) (DCId (-2))
 
-unfoldH1 :: MonadChoice m => m S1
+unfoldH1 :: (WithParams, MonadChoice m) => m S1
 unfoldH1 = tag >> instantiateH1 >>= \done ->
   if done then
     get
@@ -137,12 +138,23 @@ unfoldH1 = tag >> instantiateH1 >>= \done ->
 
 type Tree_ s = Free (ChoiceF s) s
 
-treeH1 :: Tree_ S1
+treeH1 :: WithParams => Tree_ S1
 treeH1 =
   quickPrune 3 .
   collapseTags 10 .
+  relevantRelevance .
   runM $
   unfoldH1
+
+relevantRelevance :: WithParams => Free (ChoiceF s) a -> Free (ChoiceF s) a
+relevantRelevance
+  | relevance = id
+  | otherwise = relevantRelevance'
+
+relevantRelevance' :: Free (ChoiceF s) a -> Free (ChoiceF s) a
+relevantRelevance' (Free (Pick "Rel" ((_, t) : _))) = relevantRelevance' t
+relevantRelevance' (Free f) = Free (fmap relevantRelevance' f)
+relevantRelevance' (Pure a) = Pure a
 
 collapseTags :: Int -> Free (ChoiceF s) a -> Free (ChoiceF s) a
 collapseTags fuel = everywhere (collapse fuel)
@@ -171,7 +183,7 @@ everywhere p t =
     Pure a -> Pure a
     Free f -> Free (fmap (everywhere p) f)
 
-instantiateH1 :: MonadChoice m => m Bool
+instantiateH1 :: (WithParams, MonadChoice m) => m Bool
 instantiateH1 = do
   ks <- use ksH1
   picks <- for (focus ks) $ \(k1, ks') ->
@@ -488,22 +500,22 @@ derivationH1 history = unfoldTree f k0
   where
     f k = (k, msum (Map.lookup k history))
 
-showK1 :: S1 -> K1 -> Maybe String
+showK1 :: WithParams => S1 -> K1 -> Maybe String
 showK1 s (K1Type ctx u v) =
   Just
     ( showCtx s ctx ++
-      " |- " ++ showDCHead s u ((show u ++ " = ") ++) ++
+      " ⊢ " ++ showDCHead s u ((show u ++ " = ") ++) ++
       " : " ++ showDCHead s v (++ (" = " ++ show v)))
--- showK1 s k@(K1Eq{}) = Just (show k)
+showK1 _ k@(K1Eq{}) | showEqualities = Just (show k)
 showK1 s (K1_ k) = fmap parens (showK1 s k)
 showK1 _ _ = Nothing
 
 showCtx :: S1 -> Ctx -> String
 showCtx _ ctx =
-  intercalate ","
+  (intercalate "," . reverse)
     [showDeBruijnV n ++ ":" ++ show u | (n, u) <- zip [DeBruijnV 0 ..] (varCtx ctx)]
 
-showDCHead :: S1 -> DCId -> (String -> String) -> String
+showDCHead :: WithParams => S1 -> DCId -> (String -> String) -> String
 showDCHead s u cont = case Map.lookup u (s ^. eqnsH1) of
   Just a -> cont (showDCoreSoup a)
   Nothing -> show u
@@ -515,10 +527,10 @@ joinTree (Node a ts) =
     Just a -> [Node a ts']
     Nothing -> ts'
 
-showTree :: S1 -> Tree K1 -> String
+showTree :: WithParams => S1 -> Tree K1 -> String
 showTree s = drawForest . joinTree . fmap (showK1 s)
 
-showCurrentDerivation :: S1 -> String
+showCurrentDerivation :: WithParams => S1 -> String
 showCurrentDerivation s = showTree s (currentDerivation s)
 
 showRoot :: Free (ChoiceF s) a -> String
@@ -528,14 +540,14 @@ showRoot (Free (Fail e)) = "Fail: " ++ e
 showRoot (Free (Pick d _)) = "Pick[" ++ d ++ "]"
 showRoot (Pure _) = "Done"
 
-showSolution :: S1 -> String
+showSolution :: WithParams => S1 -> String
 showSolution s =
   case k0 of
     K1Type ctx u v ->
-      showCtx s ctx ++ " |- " ++ showDCTerm s 0 u ++ " : " ++ showDCTerm s 0 v
+      showCtx s ctx ++ " ⊢ " ++ showDCTerm s 0 u ++ " : " ++ showDCTerm s 0 v
     _ -> "assert false"
 
-showDCTerm :: S1 -> Int -> DCId -> String
+showDCTerm :: WithParams => S1 -> Int -> DCId -> String
 showDCTerm s n u = ("\n" ++) . postProcess 0 [0] $ showDCTerm' s n u
 
 postProcess :: Int -> [Int] -> String -> String
@@ -546,7 +558,10 @@ postProcess n ~(_ : u) (')' : s) = ')' : postProcess (n+1) u s
 postProcess n u (c : s) = c : postProcess (n+1) u s
 postProcess _ _ [] = []
 
-showDCTerm' :: S1 -> Int -> DCId -> String
+showDCTerm' :: WithParams => S1 -> Int -> DCId -> String
 showDCTerm' s n u = case Map.lookup u (s ^. eqnsH1) of
   Just h -> showDCoreSoup_ (showDCTerm' s) n h ++ "\n"
   Nothing -> show u ++ "\n"
+
+showEqn :: WithParams => (DCId, DCore_ Soup) -> String
+showEqn (u, t) = show u ++ " = " ++ showDCoreSoup t

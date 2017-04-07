@@ -8,12 +8,13 @@ import Control.Monad.Random
 import Data.Vector.Mutable (MVector)
 import qualified Data.Vector.Mutable as MV
 
+import Decor.Soup
 import Decor.Soup.Simple
 
 newtype Stream m s = Stream { unStream :: m (Maybe (s, Stream m s)) }
 
 streamingSearch
-  :: (PrimMonad m, MonadRandom m)
+  :: (WithParams, PrimMonad m, MonadRandom m)
   => Int -> Stream m S1
 streamingSearch n = Stream $ do
   v <- MV.unsafeNew n
@@ -37,9 +38,6 @@ streamingSearch' v n = do
     Pure s -> clear (\continue -> return (Just (s, Stream continue)))
     Free f -> case f of
       Tag _ t -> do
-        MV.unsafeWrite v i t
-        streamingSearch' v n
-      Pick "Rel" ((_, t) : _) -> do
         MV.unsafeWrite v i t
         streamingSearch' v n
       Pick _ xs@(_ : _) -> do

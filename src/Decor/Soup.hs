@@ -1,4 +1,5 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveFoldable #-}
@@ -8,6 +9,7 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -96,6 +98,22 @@ data K where
   -- ^ Redundant constraints.
 
   deriving (Eq, Show)
+
+data Params = Params
+  { _showEqualities :: Bool
+  , _relevance :: Bool
+  } deriving Generic
+
+type WithParams = (?params :: Params)
+
+defaultParams :: Params
+defaultParams = Params False False
+
+showEqualities :: WithParams => Bool
+showEqualities = _showEqualities ?params
+
+relevance :: WithParams => Bool
+relevance = _relevance ?params
 
 kEqDC :: DCId -> RHS -> K
 kEqDC = KEqDC
@@ -331,21 +349,21 @@ class Lns (n :: Symbol) s a | n s -> a where
 instance Lns "ks" (S h) h where
   l f s = fmap (\h -> s { constraints = h }) (f (constraints s))
 
-showDCoreSoup_ :: (Int -> DCId -> String) -> Int -> DCore_ Soup -> String
+showDCoreSoup_ :: WithParams => (Int -> DCId -> String) -> Int -> DCore_ Soup -> String
 showDCoreSoup_ showDCId n t = case t of
   Star -> "*"
   Var n -> showDeBruijnV n
   App t u rel ->
     parensIf (n >= 11) $
-      showDCId 10 t ++ " " ++ showRel rel ++ " " ++ showDCId 11 u
+      showDCId 10 t ++ " " ++ showRel rel " " ++ showDCId 11 u
   Pi rel () u v ->
     parensIf (n >= 0) $
-      "Π" ++ showRel rel ++ " " ++ showDCId 11 u ++ " -> " ++ showDCId (-1) v
+      "Π" ++ showRel rel "" ++ " " ++ showDCId 11 u ++ " -> " ++ showDCId (-1) v
   Abs rel () u v ->
     parensIf (n >= 0) $
-      "λ" ++ showRel rel ++ " " ++ showDCId 11 u ++ " . " ++ showDCId (-1) v
+      "λ" ++ showRel rel "" ++ " " ++ showDCId 11 u ++ " . " ++ showDCId (-1) v
 
-showDCoreSoup :: DCore_ Soup -> String
+showDCoreSoup :: WithParams => DCore_ Soup -> String
 showDCoreSoup = showDCoreSoup_ (const show) 0
 
 parensIf :: Bool -> String -> String
@@ -355,9 +373,10 @@ parensIf False s = s
 showDeBruijnV :: DeBruijnV -> String
 showDeBruijnV (DeBruijnV x) = "i" ++ show x
 
-showRel :: Rel -> String
-showRel Rel = "+"
-showRel Irr = "-"
+showRel :: WithParams => Rel -> String -> String
+showRel _ | not relevance = id
+showRel Rel = ("+" ++)
+showRel Irr = ("-" ++)
 
 parens :: String -> String
 parens s = "(" ++ s ++ ")"
