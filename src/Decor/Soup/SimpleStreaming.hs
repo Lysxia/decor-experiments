@@ -39,6 +39,9 @@ streamingSearch' v n = do
       Tag _ t -> do
         MV.unsafeWrite v i t
         streamingSearch' v n
+      Pick "Rel" ((_, t) : _) -> do
+        MV.unsafeWrite v i t
+        streamingSearch' v n
       Pick _ xs@(_ : _) -> do
         let t : ts = fmap snd xs
         MV.unsafeWrite v i t

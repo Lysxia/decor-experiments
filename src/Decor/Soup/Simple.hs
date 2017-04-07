@@ -133,7 +133,7 @@ unfoldH1 = tag >> instantiateH1 >>= \done ->
   if done then
     get
   else
-    reduceH1 >> unfoldH1
+    reduceH1 >> unfoldH1 >>= \s -> boringCheck s >> return s
 
 type Tree_ s = Free (ChoiceF s) s
 
@@ -224,6 +224,21 @@ toK1 (K_ k) = fmap K1_ (toK1 k)
 --   case Map.lookup t eqns of
 --     Nothing -> eqnsH1 %= Map.insert t h >> return []
 --     Just h' -> eqHeadsH1 h h'
+
+boringCheck :: MonadChoice m => S1 -> m ()
+boringCheck s = do
+  let K1Type _ _ v = k0
+  if unlikeStar (s ^. eqnsH1) v then
+    return ()
+  else
+    fail "Boring type"
+
+unlikeStar :: Map DCId (DCore_ Soup) -> DCId -> Bool
+unlikeStar eqns v = case Map.lookup v eqns of
+  Nothing -> True
+  Just Star -> False
+  Just (Pi _ _ _ v') -> unlikeStar eqns v'
+  Just _ -> True
 
 eqHeadsH1 :: MonadChoice m => DCore_ Soup -> DCore_ Soup -> Shift -> DeBruijnV -> m [K1]
 eqHeadsH1 e1 e2 n m = case (e1, e2) of
@@ -475,7 +490,7 @@ showK1 s (K1Type ctx u v) =
     ( showCtx s ctx ++
       " |- " ++ showDCHead s u ((show u ++ " = ") ++) ++
       " : " ++ showDCHead s v (++ (" = " ++ show v)))
-showK1 s k@(K1Eq{}) = Just (show k)
+-- showK1 s k@(K1Eq{}) = Just (show k)
 showK1 s (K1_ k) = fmap parens (showK1 s k)
 showK1 _ _ = Nothing
 
