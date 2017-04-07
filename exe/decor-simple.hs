@@ -15,16 +15,24 @@ import Options.Generic
 import System.Environment (getArgs)
 import System.IO
 import qualified Data.List.NonEmpty as NonEmpty
+import qualified Data.Map as Map
 
 import Decor.Soup
 import Decor.Soup.Simple
 import Decor.Soup.SimpleRandom
+import Decor.Soup.SimpleStreaming
 
 data Options
   = Gen
   { _out :: Maybe String
   , _secs :: Maybe Int
   , _fuel :: Maybe Int
+  }
+  | Streaming
+  { _out :: Maybe String
+  , _secs :: Maybe Int
+  , _width :: Maybe Int
+  , _iter :: Maybe Int
   }
   | RunApp
   { _out :: Maybe String
@@ -41,6 +49,35 @@ main = do
   case opts of
     Gen{} -> search opts
     RunApp{} -> runApp opts
+    Streaming{} -> stream opts
+
+stream :: Options -> IO ()
+stream opts = do
+  let width = fromMaybe 100 (_width opts)
+      stream = streamingSearch width
+      streamWith' = streamWith (_iter opts) stream
+      runStream = case _out opts of
+        Nothing -> streamWith' stdout
+        Just file -> withFile file WriteMode streamWith'
+  m <- newEmptyMVar
+  tid <- forkFinally runStream $ \_ -> putMVar m ()
+  case _secs opts of
+    Nothing -> do
+      () <- takeMVar m
+      return ()
+    Just secs -> do
+      threadDelay (secs * 10^6)
+      killThread tid
+
+streamWith :: Maybe Int -> Stream IO S1 -> Handle -> IO ()
+streamWith (Just 0) _ _ = return ()
+streamWith n (Stream continue) h = do
+  x <- continue
+  case x of
+    Nothing -> return ()
+    Just (s, continue) -> do
+      hPutStrLn h (showSolution s)
+      streamWith (fmap (subtract 1) n) continue h
 
 search :: Options -> IO ()
 search opts = do
@@ -124,8 +161,12 @@ app = App
               history
           )
           <=>
-          ( vLimit 5 . viewport k_window Vertical .
-              str . unlines . fmap show . ks1 . constraints $ s
+          ( vLimit 5 $
+              ( viewport k_window Both $
+                  (str . unlines . fmap show . Map.toList . eqns . constraints) s
+                  <+>
+                  (str . unlines . fmap show . ks1 . constraints) s
+              )
           )
         ]
   , appChooseCursor = \_ _ -> Nothing

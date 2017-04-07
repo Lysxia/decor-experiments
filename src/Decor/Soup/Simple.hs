@@ -475,6 +475,7 @@ showK1 s (K1Type ctx u v) =
     ( showCtx s ctx ++
       " |- " ++ showDCHead s u ((show u ++ " = ") ++) ++
       " : " ++ showDCHead s v (++ (" = " ++ show v)))
+showK1 s k@(K1Eq{}) = Just (show k)
 showK1 s (K1_ k) = fmap parens (showK1 s k)
 showK1 _ _ = Nothing
 
