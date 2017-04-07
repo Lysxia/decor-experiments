@@ -375,7 +375,7 @@ checkIrr n h = case h of
   Var m | n == m -> fail "Irrelevant"
   Var _ -> return []
   Pi _rel () tyA tyB -> return [K1Irr n tyA, K1Irr (shift n 1) tyB]
-  Abs _rel () tyA b -> return [K1Irr n tyA, K1Irr (shift n 1) b]
+  Abs _rel () tyA b -> return [K1Irr (shift n 1) b]
   App b a _rel -> return [K1Irr n b, K1Irr n a]
 
 -- DCId DCId Shift Shift           -- ^ @u = v^n_m@ shift all indices >= m by n
