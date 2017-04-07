@@ -134,7 +134,14 @@ unfoldH1 = tag >> instantiateH1 >>= \done ->
   if done then
     get
   else
-    reduceH1 >> unfoldH1 -- >>= \s -> boringCheck s >> return s
+    reduceH1 >> unfoldH1 >>= \s -> do
+      if not absurd then
+        absurdCheck s
+      else if not boring then
+        boringCheck s
+      else
+        return ()
+      return s
 
 type Tree_ s = Free (ChoiceF s) s
 
@@ -255,6 +262,31 @@ unlikeStar eqns v = case Map.lookup v eqns of
   Just Star -> False
   Just (Pi _ _ _ v') -> unlikeStar eqns v'
   Just _ -> True
+
+absurdCheck :: MonadChoice m => S1 -> m ()
+absurdCheck s = do
+  let K1Type _ _ v = k0
+  if noAbsurdParameters (s ^. eqnsH1) v then
+    return ()
+  else
+    fail "Absurd type"
+
+noAbsurdParameters :: Map DCId (DCore_ Soup) -> DCId -> Bool
+noAbsurdParameters eqns v = case Map.lookup v eqns of
+  Nothing -> True
+  Just Star -> False
+  Just (Pi _ () u' v') ->
+    notAbsurdType eqns u' && noAbsurdParameters eqns v'
+  Just _ -> True
+
+notAbsurdType :: Map DCId (DCore_ Soup) -> DCId -> Bool
+notAbsurdType eqns u = loop u (DeBruijnV 0)
+  where
+    loop u n = case Map.lookup u eqns of
+      Nothing -> True
+      Just (Pi _ () _ u') -> loop u' (shift n 1)
+      Just (Var m) | m < n -> False
+      Just _ -> True
 
 eqHeadsH1 :: MonadChoice m => DCore_ Soup -> DCore_ Soup -> Shift -> DeBruijnV -> m [K1]
 eqHeadsH1 e1 e2 n m = case (e1, e2) of
@@ -391,7 +423,7 @@ checkIrr n h = case h of
   Var m | n == m -> fail "Irrelevant"
   Var _ -> return []
   Pi _rel () tyA tyB -> return [K1Irr n tyA, K1Irr (shift n 1) tyB]
-  Abs _rel () tyA b -> return [K1Irr (shift n 1) b]
+  Abs _rel () _ b -> return [K1Irr (shift n 1) b]
   App b a _rel -> return [K1Irr n b, K1Irr n a]
 
 -- DCId DCId Shift Shift           -- ^ @u = v^n_m@ shift all indices >= m by n
@@ -553,7 +585,7 @@ showDCTerm s n u = ("\n" ++) . postProcess 0 [0] $ showDCTerm' s n u
 postProcess :: Int -> [Int] -> String -> String
 postProcess _ u@(n : _) ('\n' : s) =
   '\n' : replicate n ' ' ++ postProcess n u (dropWhile isSpace s)
-postProcess n u ('(' : s) = '(' : postProcess (n+1) (n : u) s
+postProcess n u ('(' : s) = '(' : postProcess (n+1) (n + 1 : u) s
 postProcess n ~(_ : u) (')' : s) = ')' : postProcess (n+1) u s
 postProcess n u (c : s) = c : postProcess (n+1) u s
 postProcess _ _ [] = []
