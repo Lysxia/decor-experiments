@@ -41,11 +41,20 @@ streamingSearch' v n = do
         MV.unsafeWrite v i t
         streamingSearch' v n
       Pick _ xs@(_ : _) -> do
-        let t : ts = fmap snd xs
+        t : ts <- shuffle (fmap snd xs)
         MV.unsafeWrite v i t
         n <- append v n ts
         streamingSearch' v n
       _ -> clear id
+
+shuffle :: MonadRandom m => [a] -> m [a]
+shuffle xs = shuffle' xs (length xs)
+  where
+    shuffle' _ 0 = return []
+    shuffle' xs n = do
+      i <- getRandomR (0, n-1)
+      let (xs0, x : xs1) = splitAt i xs
+      fmap (x :) (shuffle' (xs0 ++ xs1) (n - 1))
 
 append :: PrimMonad m => MVector (PrimState m) a -> Int -> [a] -> m Int
 append v n (a : as) | n < MV.length v = do
