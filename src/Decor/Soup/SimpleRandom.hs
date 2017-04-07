@@ -36,6 +36,7 @@ randomSearch' fuel s ok fail t = handle h $ case t of
     Tag _ (Free (Tag s' _)) -> fail (fuel-1) "Potential occurs-fail" s'
     Tag s' t' -> logS (fuel, s') >> randomSearch' fuel s' ok fail t'
     Fail e -> fail (fuel-1) e s
+    Pick "Rel" ((_, t') : _) -> randomSearch' fuel s ok fail t'
     Pick x ys -> randomPick fuel x ys (length ys)
   where
 
