@@ -284,8 +284,9 @@ notAbsurdType eqns u = loop u (DeBruijnV 0)
   where
     loop u n = case Map.lookup u eqns of
       Nothing -> True
-      Just (Pi _ () _ u') -> loop u' (shift n 1)
-      Just (Var m) | m < n -> False
+      Just (Pi _ () _ u') -> case Map.lookup u' eqns of
+        Just (Var m) | m == DeBruijnV 0 -> False
+        _ -> True
       Just _ -> True
 
 eqHeadsH1 :: MonadChoice m => DCore_ Soup -> DCore_ Soup -> Shift -> DeBruijnV -> m [K1]
