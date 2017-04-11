@@ -24,37 +24,54 @@ import Decor.Soup.Simple
 import Decor.Soup.SimpleRandom
 import Decor.Soup.SimpleStreaming
 
-data Options
-  = Gen
-  { _out :: Maybe String
-  , _secs :: Maybe Int
-  , _fuel :: Maybe Int
-  }
-  | Streaming
-  { _out :: Maybe String
+data RunMode = Gen | Streaming | RunApp deriving (Generic, Read, Show)
+
+data Options = Options
+  { _mode :: RunMode
+  , _out :: Maybe String
   , _secs :: Maybe Int
   , _width :: Maybe Int
   , _iter :: Maybe Int
-  }
-  | RunApp
-  { _out :: Maybe String
+  , __fuel :: Maybe Int
+  , __tries :: Maybe Int
+  , __showEqualities :: Bool
+  , __relevance :: Bool
+  , __boring :: Bool
+  , __absurd :: Bool
   } deriving Generic
 
 _file :: Options -> String
 _file = fromMaybe "decor-log" . _out
+
+instance ParseField RunMode where
+instance ParseFields RunMode where
+instance ParseRecord RunMode where
 
 instance ParseRecord Options where
   parseRecord = parseRecordWithModifiers defaultModifiers{fieldNameModifier=tail}
 
 main = do
   opts <- getRecord "decor"
-  let ?params = defaultParams
-  case opts of
-    Gen{} -> search opts
-    RunApp{} -> runApp opts
-    Streaming{} -> stream opts
+  let ?params = defaultParams' opts
+      ?randomSearchParams = defaultRSP opts
+  case _mode opts of
+    Gen -> search opts
+    RunApp -> runApp opts
+    Streaming -> stream opts
 
-stream :: WithParams => Options -> IO ()
+defaultRSP opts = RandomSearchParams
+  { _maxFuel = fromMaybe 100 (__fuel opts)
+  , _maxTries = fromMaybe 2 (__tries opts)
+  }
+
+defaultParams' opts = Params
+  { _showEqualities = __showEqualities opts
+  , _relevance = __relevance opts
+  , _boring = __boring opts
+  , _absurd = __absurd opts
+  }
+
+stream :: (WithParams, WithRandomSearchParams) => Options -> IO ()
 stream opts = do
   let width = fromMaybe 100 (_width opts)
       stream = streamingSearch width
@@ -82,14 +99,13 @@ streamWith n (Stream continue) h = do
       hPutStrLn h (showSolution s)
       streamWith (fmap (subtract 1) n) continue h
 
-search :: WithParams => Options -> IO ()
+search :: (WithParams, WithRandomSearchParams) => Options -> IO ()
 search opts = do
-  let fuel = fromMaybe 100 (_fuel opts)
   m <- newEmptyMVar
   log <- newMVar []
   result <- newEmptyMVar
   tid <- forkIO $ mask $ \restore ->
-    restore (runLogS m (randomSearch fuel)) >>= putMVar result
+    restore (runLogS m randomSearch) >>= putMVar result
   let loop 0 = killThread tid
       loop n = do
         threadDelay (10 ^ 6)

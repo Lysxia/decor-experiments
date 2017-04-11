@@ -10,11 +10,12 @@ import qualified Data.Vector.Mutable as MV
 
 import Decor.Soup
 import Decor.Soup.Simple
+import Decor.Soup.SimpleRandom
 
 newtype Stream m s = Stream { unStream :: m (Maybe (s, Stream m s)) }
 
 streamingSearch
-  :: (WithParams, PrimMonad m, MonadRandom m)
+  :: (WithParams, WithRandomSearchParams, PrimMonad m, MonadRandom m)
   => Int -> Stream m S1
 streamingSearch n = Stream $ do
   v <- MV.unsafeNew n
@@ -22,7 +23,7 @@ streamingSearch n = Stream $ do
   streamingSearch' v 1
 
 streamingSearch'
-  :: (PrimMonad m, MonadRandom m)
+  :: (PrimMonad m, MonadRandom m, WithRandomSearchParams)
   => MVector (PrimState m) (Tree_ s)
   -> Int
   -> m (Maybe (s, Stream m s))
@@ -41,20 +42,20 @@ streamingSearch' v n = do
         MV.unsafeWrite v i t
         streamingSearch' v n
       Pick _ xs@(_ : _) -> do
-        t : ts <- shuffle (fmap snd xs)
+        t : ts <- shuffle maxTries (fmap snd xs)
         MV.unsafeWrite v i t
         n <- append v n ts
         streamingSearch' v n
       _ -> clear id
 
-shuffle :: MonadRandom m => [a] -> m [a]
-shuffle xs = shuffle' xs (length xs)
+shuffle :: MonadRandom m => Int -> [a] -> m [a]
+shuffle k xs = shuffle' k xs (length xs)
   where
-    shuffle' _ 0 = return []
-    shuffle' xs n = do
+    shuffle' k _ n | k == 0 || n == 0 = return []
+    shuffle' k xs n = do
       i <- getRandomR (0, n-1)
       let (xs0, x : xs1) = splitAt i xs
-      fmap (x :) (shuffle' (xs0 ++ xs1) (n - 1))
+      fmap (x :) (shuffle' k (xs0 ++ xs1) (n - 1))
 
 append :: PrimMonad m => MVector (PrimState m) a -> Int -> [a] -> m Int
 append v n (a : as) | n < MV.length v = do

@@ -1,7 +1,10 @@
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Decor.Soup.SimpleRandom where
 
@@ -15,16 +18,30 @@ import Control.Monad.Reader
 import Decor.Soup
 import Decor.Soup.Simple
 
+data RandomSearchParams = RandomSearchParams
+  { _maxFuel :: Int  -- Number of failures
+  , _maxTries :: Int  -- Max branching factor
+  }
+
+type WithRandomSearchParams = (?randomSearchParams :: RandomSearchParams)
+
+getFuel :: WithRandomSearchParams => Int
+getFuel = _maxFuel ?randomSearchParams
+
+maxTries :: WithRandomSearchParams => Int
+maxTries = _maxTries ?randomSearchParams
+
 randomSearch
-  :: (WithParams, MonadCatch m, MonadRandom m, MonadLogS Log m)
-  => Int -> m (Either (String, S1) S1)
-randomSearch n = randomSearch' n initS1 ok fail treeH1
+  :: (WithParams, WithRandomSearchParams, MonadCatch m, MonadRandom m, MonadLogS Log m)
+  => m (Either (String, S1) S1)
+randomSearch = randomSearch' getFuel initS1 ok fail treeH1
   where
     ok s = return (Right s)
     fail _ e s = return (Left (e, s))
 
 randomSearch'
-  :: (MonadCatch m, MonadRandom m, MonadLogS (Int, s) m)
+  :: forall m s r
+  .  (MonadCatch m, MonadRandom m, MonadLogS (Int, s) m, WithRandomSearchParams)
   => Int
   -> s
   -> (s -> m r)
@@ -37,22 +54,24 @@ randomSearch' fuel s ok fail t = handle h $ case t of
     Tag _ (Free (Tag s' _)) -> fail (fuel-1) "Potential occurs-fail" s'
     Tag s' t' -> logS (fuel, s') >> randomSearch' fuel s' ok fail t'
     Fail e -> fail (fuel-1) e s
-    Pick x ys -> randomPick fuel x ys (length ys)
+    Pick _ [(_, t')] -> randomSearch' fuel s ok fail t'
+    Pick x ys -> randomPick maxTries fuel x ys (length ys)
   where
 
     h ThreadKilled = fail 0 "KILL" s
     h UserInterrupt = fail 0 "INT" s
     h e = throwM e
 
-    randomPick fuel x _ 0 = fail (fuel - 1) (show x) s
-    randomPick fuel x ys n = do
+    randomPick :: Show x => Int -> Int -> String -> [(x, Tree_ s)] -> Int -> m r
+    randomPick triesLeft fuel x _ n | n == 0 || triesLeft == 0 = fail (fuel - 1) (show x) s
+    randomPick triesLeft fuel x ys n = do
       w <- getRandomR (0, n - 1)
       let (ys0, (y, t') : ys1) = splitAt w ys
           fail' fuel e s =
             if fuel == 0 then
               fail 0 ("[" ++ x ++ ":" ++ show y ++ "]\n" ++ e) s
             else
-              randomPick fuel x (ys0 ++ ys1) (n - 1)
+              randomPick (triesLeft - 1) fuel x (ys0 ++ ys1) (n - 1)
       randomSearch' fuel s ok fail' t'
 
 type Log = (Int, S1)
