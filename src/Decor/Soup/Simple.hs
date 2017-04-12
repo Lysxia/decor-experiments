@@ -151,8 +151,9 @@ type Tree_ s = Free (ChoiceF s) s
 
 treeH1 :: WithParams => Tree_ S1
 treeH1 =
-  quickPrune 3 .
-  collapseTags 10 .
+  collapseTags jumping .
+  quickPrune pruning .
+  collapseTags 5 .
   relevantRelevance .
   runM $
   initialize >> unfoldH1
@@ -174,17 +175,17 @@ collapseTags fuel = everywhere (collapse fuel)
     collapse _ f = f
 
 quickPrune :: WithParams => Int -> Free (ChoiceF s) a -> Free (ChoiceF s) a
-quickPrune _ | noPruning = id
 quickPrune fuel = everywhere (prune fuel)
   where
-    prune n (Free f) | n > 0 = Free $ case fmap (prune (n-1)) f of
+    prune n (Free f) | n > 0 = case fmap (prune (n-1)) f of
       Pick d xs ->
         case [(x, a) | (x, a) <- xs, not (isFail a)] of
-          [] -> Fail "No good pick"
-          xs -> Pick d xs
-      Fail s -> Fail s
-      Tag _ (Free (Fail e)) -> Fail e
-      f -> f
+          [] -> Free $ Fail "No good pick"
+          [(_, x)] | d == "Sub" -> x
+          xs -> Free $ Pick d xs
+      Fail s -> Free $ Fail s
+      Tag _ (Free (Fail e)) -> Free $ Fail e
+      f -> Free f
     prune _ t = t
     isFail (Free (Fail _)) = True
     isFail _ = False

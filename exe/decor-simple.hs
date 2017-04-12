@@ -40,7 +40,8 @@ data Options = Options
   , __relevance :: Bool
   , __boring :: Bool
   , __absurd :: Bool
-  , __noPruning :: Bool
+  , __pruning :: Maybe Int
+  , __jumping :: Maybe Int
   , __iniTerm :: Maybe String
   , __iniType :: Maybe String
   } deriving Generic
@@ -78,7 +79,8 @@ defaultParams opts = do
     , _relevance = __relevance opts
     , _boring = __boring opts
     , _absurd = __absurd opts
-    , _noPruning = __noPruning opts
+    , _pruning = fromMaybe 5 (__pruning opts)
+    , _jumping = fromMaybe 5 (__jumping opts)
     , _iniTerm = join iniT
     , _iniType = join iniTy
     }

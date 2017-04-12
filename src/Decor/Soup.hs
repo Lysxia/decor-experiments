@@ -106,7 +106,8 @@ data Params = Params
   , _relevance :: Bool
   , _boring :: Bool
   , _absurd :: Bool
-  , _noPruning :: Bool
+  , _pruning :: Int
+  , _jumping :: Int
   , _iniTerm :: P.DCore
   , _iniType :: P.DCore
   } deriving Generic
@@ -155,8 +156,11 @@ boring = _boring ?params
 absurd :: WithParams => Bool
 absurd = _absurd ?params
 
-noPruning :: WithParams => Bool
-noPruning = _noPruning ?params
+pruning :: WithParams => Int
+pruning = _pruning ?params
+
+jumping :: WithParams => Int
+jumping = _jumping ?params
 
 kEqDC :: DCId -> RHS -> K
 kEqDC = KEqDC
