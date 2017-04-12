@@ -67,7 +67,7 @@ main = do
 
 defaultRSP opts = RandomSearchParams
   { _maxFuel = fromMaybe 100 (__fuel opts)
-  , _maxTries = fromMaybe 2 (__tries opts)
+  , _maxTries = fromMaybe 100 (__tries opts)
   }
 
 defaultParams opts = do
@@ -237,6 +237,8 @@ app = App
           | Just hs' <- NonEmpty.nonEmpty hs ->
               continue hs'
         EvKey KDown []
+          | (_, s, t) : _ <- drop k zs, [("Done", _, _)] <- children s t ->
+              continue hs_
           | (_, s, t) : _ <- drop k zs, zs@(_ : _) <- children s t ->
               continue (NonEmpty.cons (zs, 0) hs_)
         EvKey KLeft  []
@@ -262,7 +264,7 @@ stateOf (Pure s) = Just s
 stateOf _ = Nothing
 
 children :: s -> Tree_ s -> [(String, s, Tree_ s)]
-children _ (Pure s) = []
+children _ (Pure s) = [("Done", s, Pure s)]
 children s (Free f) = case f of
   Tag _ f@(Free (Tag _ _)) -> [name "Continue" f]
   Tag _ f -> children s f

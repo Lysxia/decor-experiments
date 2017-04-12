@@ -131,6 +131,7 @@ initialize = do
   k1 <- fmap (concat . fmap toK1) $ ini (DCId (-1)) (_iniTerm ?params)
   k2 <- fmap (concat . fmap toK1) $ ini (DCId (-2)) (_iniType ?params)
   ksH1 %= (k1 ++) . (k2 ++)
+  tag
 
 k0 :: K1
 k0 = K1Type emptyCtx (DCId (-1)) (DCId (-2))
@@ -172,7 +173,7 @@ relevantRelevance' (Free (Pick "Rel" ((_, t) : _))) = relevantRelevance' t
 relevantRelevance' (Free f) = Free (fmap relevantRelevance' f)
 relevantRelevance' (Pure a) = Pure a
 
-collapseTags :: Int -> Free (ChoiceF s) a -> Free (ChoiceF s) a
+collapseTags :: WithParams => Int -> Free (ChoiceF s) a -> Free (ChoiceF s) a
 collapseTags fuel = everywhere (collapse fuel)
   where
     collapse n (Free (Tag _ t@(Free (Tag _ _)))) | n > 0 = collapse (n-1) t
