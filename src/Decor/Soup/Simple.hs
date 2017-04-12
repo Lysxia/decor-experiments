@@ -137,21 +137,15 @@ k0 :: K1
 k0 = K1Type emptyCtx (DCId (-1)) (DCId (-2))
 
 unfoldH1 :: (WithParams, MonadChoice m) => m S1
-unfoldH1 = reduceH1 >> unfoldH1'
-
-unfoldH1' :: (WithParams, MonadChoice m) => m S1
-unfoldH1' = tag >> instantiateH1 >>= \done ->
-  if done then
-    get
-  else
-    unfoldH1 >>= \s -> do
-      if not absurd then
-        absurdCheck s
-      else if not boring then
-        boringCheck s
-      else
-        return ()
-      return s
+unfoldH1 = do
+  reduceH1
+  tag
+  s <- get
+  if not absurd then absurdCheck s
+  else if not boring then boringCheck s
+  else return ()
+  done <- instantiateH1
+  if done then get else unfoldH1
 
 type Tree_ s = Free (ChoiceF s) s
 
@@ -310,7 +304,7 @@ eqHeadsH1 e1 e2 n m = case (e1, e2) of
     | v2 >= m && shift v2 n < m -> fail "Var, scope"
     | if v2 >= m then v1 == shift v2 n else v1 == v2 ->
         return []
-  (Var{}, _) -> fail "Var"
+  (Var{}, _) -> fail $ "Var " ++ show (e1, e2, n, m)
 
   (Abs rel1 () tyA1 b1, Abs rel2 () tyA2 b2)
     | rel1 == rel2 ->
@@ -345,7 +339,7 @@ refresh h 0 (DeBruijnV 0) _ = return (h, [])
 refresh h n m k = case h of
   Star -> return (Star, [])
   Var v
-    | v >= m && shift v n < m -> fail "Refresh Var, scope"
+    | v >= m && shift v n < m -> fail $ "Refresh Var, scope " ++ show (v, n, m)
     | v >= m -> return (Var (shift v n), [])
     | otherwise -> return (Var v, [])
   Abs rel () tyA b -> do
@@ -398,6 +392,8 @@ reduceAtomH1 (K1Eq u (DC_ h) n m) = do
       eqnsH1 %= Map.insert u h'
       return ks
     Just h0 -> eqHeadsH1 h0 h n m
+
+-- u = v[w^n/n]
 reduceAtomH1 k@(K1Sub u v w n') = do
   let DeBruijnV n = n'
   eqns <- use eqnsH1
@@ -409,7 +405,7 @@ reduceAtomH1 k@(K1Sub u v w n') = do
     Nothing -> case Map.lookup u eqns of
       Just h -> do
         let left = return (Var n', [k1EqId u w n (toEnum 0)])
-            right = refresh h 0 (toEnum 0) $ \v v' _ n' -> K1Sub v v' w n'
+            right = refresh h 1 n' $ \v v' _ n' -> K1Sub v v' w n'
         (h', ks) <- join $ pick "Sub"
           [ (L "Sub", left)
           , (L "NoSub", right)

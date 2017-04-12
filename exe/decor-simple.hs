@@ -154,6 +154,7 @@ search opts = do
           history <- history
           writeFile file . unlines $
             [ "FAIL"
+            , showSolution s
             , e
             , showCurrentDerivation s
             ] ++ history
