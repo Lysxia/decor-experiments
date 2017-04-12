@@ -38,6 +38,7 @@ data Options = Options
   , __relevance :: Bool
   , __boring :: Bool
   , __absurd :: Bool
+  , __noPruning :: Bool
   } deriving Generic
 
 _file :: Options -> String
@@ -69,6 +70,7 @@ defaultParams' opts = Params
   , _relevance = __relevance opts
   , _boring = __boring opts
   , _absurd = __absurd opts
+  , _noPruning = __noPruning opts
   }
 
 stream :: (WithParams, WithRandomSearchParams) => Options -> IO ()

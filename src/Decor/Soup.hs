@@ -104,12 +104,10 @@ data Params = Params
   , _relevance :: Bool
   , _boring :: Bool
   , _absurd :: Bool
+  , _noPruning :: Bool
   } deriving Generic
 
 type WithParams = (?params :: Params)
-
-defaultParams :: Params
-defaultParams = Params False False False False
 
 showEqualities :: WithParams => Bool
 showEqualities = _showEqualities ?params
@@ -122,6 +120,9 @@ boring = _boring ?params
 
 absurd :: WithParams => Bool
 absurd = _absurd ?params
+
+noPruning :: WithParams => Bool
+noPruning = _noPruning ?params
 
 kEqDC :: DCId -> RHS -> K
 kEqDC = KEqDC

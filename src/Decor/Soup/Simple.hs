@@ -169,7 +169,8 @@ collapseTags fuel = everywhere (collapse fuel)
     collapse n (Free (Tag _ t@(Free (Tag _ _)))) | n > 0 = collapse (n-1) t
     collapse _ f = f
 
-quickPrune :: Int -> Free (ChoiceF s) a -> Free (ChoiceF s) a
+quickPrune :: WithParams => Int -> Free (ChoiceF s) a -> Free (ChoiceF s) a
+quickPrune _ | noPruning = id
 quickPrune fuel = everywhere (prune fuel)
   where
     prune n (Free f) | n > 0 = Free $ case fmap (prune (n-1)) f of
@@ -383,7 +384,7 @@ reduceAtomH1 (K1Eq u (DC_ h) n m) = do
   eqns <- use eqnsH1
   case Map.lookup u eqns of
     Nothing -> do
-      (h', ks) <- refresh h n m k1EqId
+      (h', ks) <- refresh h n m (flip k1EqId)
       eqnsH1 %= Map.insert u h'
       return ks
     Just h0 -> eqHeadsH1 h0 h n m
