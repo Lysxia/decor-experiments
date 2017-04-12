@@ -13,12 +13,14 @@ import Data.Either
 import Data.Foldable
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.Maybe (fromMaybe)
+import Data.Traversable
 import Options.Generic
 import System.Environment (getArgs)
 import System.IO
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Map as Map
 
+import qualified Decor.Parser as P
 import Decor.Soup
 import Decor.Soup.Simple
 import Decor.Soup.SimpleRandom
@@ -39,6 +41,8 @@ data Options = Options
   , __boring :: Bool
   , __absurd :: Bool
   , __noPruning :: Bool
+  , __iniTerm :: Maybe String
+  , __iniType :: Maybe String
   } deriving Generic
 
 _file :: Options -> String
@@ -53,7 +57,8 @@ instance ParseRecord Options where
 
 main = do
   opts <- getRecord "decor"
-  let ?params = defaultParams' opts
+  params <- defaultParams opts
+  let ?params = params
       ?randomSearchParams = defaultRSP opts
   case _mode opts of
     Gen -> search opts
@@ -65,13 +70,22 @@ defaultRSP opts = RandomSearchParams
   , _maxTries = fromMaybe 2 (__tries opts)
   }
 
-defaultParams' opts = Params
-  { _showEqualities = __showEqualities opts
-  , _relevance = __relevance opts
-  , _boring = __boring opts
-  , _absurd = __absurd opts
-  , _noPruning = __noPruning opts
-  }
+defaultParams opts = do
+  iniT <- for (__iniTerm opts) parse
+  iniTy <- for (__iniType opts) parse
+  return $ Params
+    { _showEqualities = __showEqualities opts
+    , _relevance = __relevance opts
+    , _boring = __boring opts
+    , _absurd = __absurd opts
+    , _noPruning = __noPruning opts
+    , _iniTerm = join iniT
+    , _iniType = join iniTy
+    }
+
+parse s = case P.parseDC s of
+  Left e -> fail (show e)
+  Right r -> return r
 
 stream :: (WithParams, WithRandomSearchParams) => Options -> IO ()
 stream opts = do

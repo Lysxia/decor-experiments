@@ -28,6 +28,7 @@ import Control.Monad.Writer
 
 import Control.Comonad.Cofree
 
+import Data.List (elemIndex)
 import Data.Maybe
 import Data.Typeable
 
@@ -40,6 +41,7 @@ import Generics.OneLiner
 import GHC.Generics (Generic)
 import GHC.TypeLits
 
+import qualified Decor.Parser as P
 import Decor.Types
 
 data Soup
@@ -105,7 +107,39 @@ data Params = Params
   , _boring :: Bool
   , _absurd :: Bool
   , _noPruning :: Bool
+  , _iniTerm :: P.DCore
+  , _iniType :: P.DCore
   } deriving Generic
+
+ini :: MonadSoup m => DCId -> P.DCore -> m [K]
+ini = ini' []
+
+ini' :: MonadSoup m => [String] -> DCId -> P.DCore -> m [K]
+ini' _ _ Nothing = return []
+ini' ctx t (Just t_) = case t_ of
+  Star -> return [KEqDC t (RHSHead Star)]
+
+  Var v
+    | Just i <- elemIndex v ctx -> return [KEqDC t (RHSHead (Var (DeBruijnV (fromIntegral i))))]
+    | otherwise -> MonadFail.fail $ "Unbound: " ++ v
+
+  Pi rel v t1_ t2_ -> do
+    (t1, t2) <- freshes
+    k1 <- ini' ctx t1 t1_
+    k2 <- ini' (v : ctx) t2 t2_
+    return (KEqDC t (RHSHead (Pi rel () t1 t2)) : k1 ++ k2)
+
+  Abs rel v t1_ t2_ -> do
+    (t1, t2) <- freshes
+    k1 <- ini' ctx t1 t1_
+    k2 <- ini' (v : ctx) t2 t2_
+    return (KEqDC t (RHSHead (Abs rel () t1 t2)) : k1 ++ k2)
+
+  App t1_ t2_ rel -> do
+    (t1, t2) <- freshes
+    k1 <- ini' ctx t1 t1_
+    k2 <- ini' ctx t2 t2_
+    return (KEqDC t (RHSHead (App t1 t2 rel)) : k1 ++ k2)
 
 type WithParams = (?params :: Params)
 

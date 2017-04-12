@@ -21,6 +21,7 @@ library
     Decor.DC
     Decor.Gen
     Decor.Main
+    Decor.Parser
     Decor.Soup
     Decor.Soup.Simple
     Decor.Soup.SimpleRandom
@@ -38,6 +39,7 @@ library
     one-liner,
     containers,
     kan-extensions,
+    megaparsec,
     microlens-platform,
     MonadRandom,
     mtl,

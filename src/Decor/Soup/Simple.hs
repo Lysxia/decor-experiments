@@ -126,15 +126,24 @@ updateHistory k ks = ksHistoryH1 %= Map.insert (strip k) (fmap strip ks)
 initS1 :: S1
 initS1 = S 0 (H1 Map.empty [k0] Map.empty)
 
+initialize :: (WithParams, MonadChoice m) => m ()
+initialize = do
+  k1 <- fmap (concat . fmap toK1) $ ini (DCId (-1)) (_iniTerm ?params)
+  k2 <- fmap (concat . fmap toK1) $ ini (DCId (-2)) (_iniType ?params)
+  ksH1 %= (k1 ++) . (k2 ++)
+
 k0 :: K1
 k0 = K1Type emptyCtx (DCId (-1)) (DCId (-2))
 
 unfoldH1 :: (WithParams, MonadChoice m) => m S1
-unfoldH1 = tag >> instantiateH1 >>= \done ->
+unfoldH1 = reduceH1 >> unfoldH1'
+
+unfoldH1' :: (WithParams, MonadChoice m) => m S1
+unfoldH1' = tag >> instantiateH1 >>= \done ->
   if done then
     get
   else
-    reduceH1 >> unfoldH1 >>= \s -> do
+    unfoldH1 >>= \s -> do
       if not absurd then
         absurdCheck s
       else if not boring then
@@ -151,7 +160,7 @@ treeH1 =
   collapseTags 10 .
   relevantRelevance .
   runM $
-  unfoldH1
+  initialize >> unfoldH1
 
 relevantRelevance :: WithParams => Free (ChoiceF s) a -> Free (ChoiceF s) a
 relevantRelevance
