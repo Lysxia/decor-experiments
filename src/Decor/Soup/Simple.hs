@@ -135,7 +135,8 @@ initialize :: (WithParams, MonadChoice m) => m ()
 initialize = do
   k1 <- ini t0 (_iniTerm ?params)
   k2 <- ini ty0 (_iniType ?params)
-  ksH1 .= (concat . fmap toK1) (k0 ++ k1 ++ k2)
+  ks <- for constants $ uncurry ini
+  ksH1 .= (concat . fmap toK1) (k0 ++ k1 ++ k2 ++ concat ks)
   tag
 
 unfoldH1 :: (WithParams, MonadChoice m) => m S1

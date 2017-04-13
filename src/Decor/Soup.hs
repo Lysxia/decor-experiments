@@ -63,7 +63,8 @@ data Constant
   = Nat
   | Zero
   | Succ
-  deriving (Eq, Ord, Read, Show)
+  | FoldNat
+  deriving (Eq, Ord, Read, Show, Enum, Bounded)
 
 shift :: DeBruijnV -> Shift -> DeBruijnV
 shift (DeBruijnV i) s = DeBruijnV (i + s)
@@ -267,7 +268,8 @@ data Ctx = Ctx
   , cVarCtx :: [EqProp DCId]
   } deriving (Eq, Ord, Show)
 
-t0 : ty0 : star0 : nat0 : natToNat0 : zero0 : succ0 = DCId <$> [-1, -2 ..] :: [DCId]
+t0 : ty0 : nat0 : etc1 = DCId <$> [-1, -2 ..] :: [DCId]
+foldNat0 : etc2 = etc1
 
 emptyCtx :: Ctx
 emptyCtx = Ctx [] []
@@ -277,11 +279,20 @@ k0 =
   -- Initial constraint
   --  |- t0 : ty0
   [ KType emptyCtx t0 ty0
-
-  -- Constants
-  , KEqDC nat0 (RHSHead (Fun Nat))
   ]
 
+natToNatTyDC
+    :: DCore_ Soup
+natToNatTyDC = Pi Rel () nat0 nat0
+
+constants :: [(DCId, P.DCore)]
+constants =
+  [ (nat0, Just (Fun "Nat"))
+
+  -- forall (r : *). Nat -> r -> (r -> r) -> r
+  , (foldNat0, (\(Right r) -> r) (P.parseDC
+      "forall r : * . forall n : Nat . forall z : r . forall s : (forall m : r . r) . r"))
+  ]
 
 data Ctx' = Ctx' [DeBruijnC]
   deriving (Eq, Ord, Show)
@@ -314,7 +325,7 @@ heads ctx =
   , (L "λ", pick' "Rel" [Rel, Irr] >>= \rel -> freshes <&> \(tyA, b) -> Abs rel () tyA b)
   , (L ";", pick' "Rel" [Rel, Irr] >>= \rel -> freshes <&> \(b, a) -> App b a rel)
   ] ++
-  [ (L "f", Fun <$> pick' "Constant" [Nat, Zero, Succ])
+  [ (L "f", Fun <$> pick' "Constant" [minBound .. maxBound])
   | not noConstants ]
   where
     (<&>) :: Functor f => f a -> (a -> b) -> f b
@@ -329,7 +340,8 @@ typeCheck' _ctx tyT Star = do
 typeCheck' _ctx tyT (Fun c) = case c of
   Nat      -> return [ kEqDC tyT (RHSHead Star) ]
   Zero     -> return [ kEqDC tyT (RHSHead (Fun Nat)) ]
-  Succ     -> return [ kEqDC tyT (RHSHead (Pi Rel () nat0 nat0)) ]
+  Succ     -> return [ kEqDC tyT (RHSHead natToNatTyDC) ]
+  FoldNat  -> return [ kEqDC tyT (RHSId foldNat0 0) ]
 
 typeCheck' ctx tyT (Var x) = do
   case lookupVar x ctx of
