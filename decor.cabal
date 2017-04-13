@@ -26,7 +26,6 @@ library
     Decor.Soup.Simple
     Decor.Soup.SimpleRandom
     Decor.Soup.SimpleStreaming
-    Decor.Soup.Trivial
     Decor.Types
     Decor.Types.DC
     Decor.UnionFind
@@ -44,6 +43,7 @@ library
     MonadRandom,
     mtl,
     primitive,
+    ref-fd,
     transformers,
     vector,
     QuickCheck,
@@ -67,6 +67,7 @@ executable decor-simple
     vty,
     decor
   ghc-options: -threaded -rtsopts
+  ghc-options: -Wall -Wno-name-shadowing
   default-language: Haskell2010
 
 executable decor-magnifique

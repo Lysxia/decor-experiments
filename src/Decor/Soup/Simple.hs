@@ -38,6 +38,7 @@ import Decor.Soup
 data ChoiceF s a
   = Tag s a
   | forall x. (Typeable x, Show x) => Pick String [(x, a)]
+  | Check a  -- Once all primary constraints (K1Type not wrapped in K1_) have been resolved
   | Fail String
 
 -- deriving instance (Show s, Show a) => Show (ChoiceF s a)
@@ -99,6 +100,10 @@ data K1
   | K1_ K1
   deriving (Eq, Ord, Show, Generic)
 
+k1_ :: K1 -> K1
+k1_ (K1_ k) = K1_ k
+k1_ k = K1_ k
+
 data IdOrDC = Id_ DCId | DC_ (DCore_ Soup)
   deriving (Eq, Ord, Show)
 
@@ -124,17 +129,14 @@ updateHistory k ks = ksHistoryH1 %= Map.insert (strip k) (fmap strip ks)
     strip k = k
 
 initS1 :: S1
-initS1 = S 0 (H1 Map.empty [k0] Map.empty)
+initS1 = S 0 (H1 Map.empty [] Map.empty)
 
 initialize :: (WithParams, MonadChoice m) => m ()
 initialize = do
-  k1 <- fmap (concat . fmap toK1) $ ini (DCId (-1)) (_iniTerm ?params)
-  k2 <- fmap (concat . fmap toK1) $ ini (DCId (-2)) (_iniType ?params)
-  ksH1 %= (k1 ++) . (k2 ++)
+  k1 <- ini t0 (_iniTerm ?params)
+  k2 <- ini ty0 (_iniType ?params)
+  ksH1 .= (concat . fmap toK1) (k0 ++ k1 ++ k2)
   tag
-
-k0 :: K1
-k0 = K1Type emptyCtx (DCId (-1)) (DCId (-2))
 
 unfoldH1 :: (WithParams, MonadChoice m) => m S1
 unfoldH1 = do
@@ -217,7 +219,7 @@ instantiateH1 = do
     [] ->
       if null [() | K1_ _ <- ks] then
         return True
-      else do
+      else wrap $ Check $ do
         ksH1 %= fmap (\k -> case k of K1_ k -> k ; k -> k)
         instantiateH1
     picks -> do
@@ -245,7 +247,7 @@ toK1 (KType ctx t u) = [K1Type ctx t u]
 toK1 (KRel Rel _) = []
 toK1 (KRel Irr u) = [K1Irr (toEnum 0) u]
 toK1 (KWF _) = []  -- Handled via redundant constraints
-toK1 (K_ k) = fmap K1_ (toK1 k)
+toK1 (K_ k) = fmap k1_ (toK1 k)
 
 -- eqHeadH1 :: DCId -> DCore_ Soup -> Shift -> Shift -> M' H1 [K1]
 -- eqHeadH1 t h = do
@@ -256,8 +258,7 @@ toK1 (K_ k) = fmap K1_ (toK1 k)
 
 boringCheck :: MonadChoice m => S1 -> m ()
 boringCheck s = do
-  let K1Type _ _ v = k0
-  if unlikeStar (s ^. eqnsH1) v then
+  if unlikeStar (s ^. eqnsH1) ty0 then
     return ()
   else
     fail "Boring type"
@@ -271,8 +272,7 @@ unlikeStar eqns v = case Map.lookup v eqns of
 
 absurdCheck :: MonadChoice m => S1 -> m ()
 absurdCheck s = do
-  let K1Type _ _ v = k0
-  if noAbsurdParameters (s ^. eqnsH1) v then
+  if noAbsurdParameters (s ^. eqnsH1) ty0 then
     return ()
   else
     fail "Absurd type"
@@ -286,9 +286,9 @@ noAbsurdParameters eqns v = case Map.lookup v eqns of
   Just _ -> True
 
 notAbsurdType :: Map DCId (DCore_ Soup) -> DCId -> Bool
-notAbsurdType eqns u = loop u (DeBruijnV 0)
+notAbsurdType eqns u = loop u
   where
-    loop u n = case Map.lookup u eqns of
+    loop u = case Map.lookup u eqns of
       Nothing -> True
       Just (Pi _ () _ u') -> case Map.lookup u' eqns of
         Just (Var m) | m == DeBruijnV 0 -> False
@@ -300,6 +300,9 @@ eqHeadsH1 e1 e2 n m = case (e1, e2) of
 
   (Star, Star) -> return []
   (Star, _) -> fail "Star"
+
+  (Fun e, Fun e') | e == e' -> return []
+  (Fun{}, _) -> fail "Fun"
 
   (Var v1, Var v2)
     | v2 >= m && shift v2 n < m -> fail "Var, scope"
@@ -339,6 +342,7 @@ refresh
 refresh h 0 (DeBruijnV 0) _ = return (h, [])
 refresh h n m k = case h of
   Star -> return (Star, [])
+  Fun e -> return (Fun e, [])
   Var v
     | v >= m && shift v n < m -> fail $ "Refresh Var, scope " ++ show (v, n, m)
     | v >= m -> return (Var (shift v n), [])
@@ -403,6 +407,7 @@ reduceAtomH1 k@(K1Sub u v w n') = do
     Just h -> do
       (h', ks) <- refresh h (-1) n' $ \v v' _ n' -> K1Sub v' v w n'
       return (k1EqDC u h' : ks)
+    -- Nothing -> return [k]
     Nothing -> case Map.lookup u eqns of
       Just h -> do
         let left = return (Var n', [k1EqId u w n (toEnum 0)])
@@ -424,11 +429,12 @@ reduceAtomH1 k@(K1Irr n u) = do
   case Map.lookup u eqns of
     Nothing -> return [k]
     Just h -> checkIrr n h
-reduceAtomH1 (K1_ k) = (fmap . fmap) K1_ (reduceAtomH1 k)
+reduceAtomH1 (K1_ k) = (fmap . fmap) k1_ (reduceAtomH1 k)
 
 checkIrr :: MonadChoice m => DeBruijnV -> DCore_ Soup -> m [K1]
 checkIrr n h = case h of
   Star -> return []
+  Fun _ -> return []
   Var m | n == m -> fail "Irrelevant"
   Var _ -> return []
   Pi _rel () tyA tyB -> return [K1Irr n tyA, K1Irr (shift n 1) tyB]
@@ -537,8 +543,9 @@ currentDerivation :: S1 -> Tree K1
 currentDerivation = derivationH1 . ksHistory . constraints
 
 derivationH1 :: Map K1 [K1] -> Tree K1
-derivationH1 history = unfoldTree f k0
+derivationH1 history = unfoldTree f k0_
   where
+    k0_ = K1Type emptyCtx t0 ty0
     f k = (k, msum (Map.lookup k history))
 
 showK1 :: WithParams => S1 -> K1 -> Maybe String
@@ -579,14 +586,11 @@ showRoot (Free (Tag _ (Free (Tag _ _)))) = "Continue"
 showRoot (Free (Tag _ f)) = showRoot f
 showRoot (Free (Fail e)) = "Fail: " ++ e
 showRoot (Free (Pick d _)) = "Pick[" ++ d ++ "]"
+showRoot (Free (Check _)) = "Check"
 showRoot (Pure _) = "Done"
 
 showSolution :: WithParams => S1 -> String
-showSolution s =
-  case k0 of
-    K1Type ctx u v ->
-      showCtx s ctx ++ " ⊢ " ++ showDCTerm s 0 u ++ " : " ++ showDCTerm s 0 v
-    _ -> "assert false"
+showSolution s = " ⊢ " ++ showDCTerm s 0 t0 ++ " : " ++ showDCTerm s 0 ty0
 
 showDCTerm :: WithParams => S1 -> Int -> DCId -> String
 showDCTerm s n u = ("\n" ++) . postProcess 0 [0] $ showDCTerm' s n u

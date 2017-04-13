@@ -36,6 +36,7 @@ data Options = Options
   , _iter :: Maybe Int
   , __fuel :: Maybe Int
   , __tries :: Maybe Int
+  , __depth :: Maybe Int
   , __showEqualities :: Bool
   , __relevance :: Bool
   , __boring :: Bool
@@ -44,6 +45,7 @@ data Options = Options
   , __jumping :: Maybe Int
   , __iniTerm :: Maybe String
   , __iniType :: Maybe String
+  , __noConstants :: Bool
   } deriving Generic
 
 _file :: Options -> String
@@ -54,7 +56,7 @@ instance ParseFields RunMode where
 instance ParseRecord RunMode where
 
 instance ParseRecord Options where
-  parseRecord = parseRecordWithModifiers defaultModifiers{fieldNameModifier=tail}
+  parseRecord = parseRecordWithModifiers lispCaseModifiers
 
 main = do
   opts <- getRecord "decor"
@@ -69,6 +71,7 @@ main = do
 defaultRSP opts = RandomSearchParams
   { _maxFuel = fromMaybe 100 (__fuel opts)
   , _maxTries = fromMaybe 100 (__tries opts)
+  , _maxDepth = fromMaybe 100 (__depth opts)
   }
 
 defaultParams opts = do
@@ -83,6 +86,7 @@ defaultParams opts = do
     , _jumping = fromMaybe 5 (__jumping opts)
     , _iniTerm = join iniT
     , _iniType = join iniTy
+    , _noConstants = __noConstants opts
     }
 
 parse s = case P.parseDC s of
@@ -273,5 +277,6 @@ children s (Free f) = case f of
   Tag _ f -> children s f
   Pick d xfs -> [name ("Pick[" ++ d ++ "]" ++ ": " ++ show x) f | (x, f) <- xfs]
   Fail e -> []
+  Check t -> children s t
   where
     name n t = (n, fromMaybe s (stateOf t), t)

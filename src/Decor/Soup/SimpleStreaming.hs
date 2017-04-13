@@ -1,10 +1,13 @@
 
 module Decor.Soup.SimpleStreaming where
 
+import Control.Applicative
 import Control.Monad
 import Control.Monad.Free
 import Control.Monad.Primitive
 import Control.Monad.Random
+import Control.Monad.Ref
+import Data.Foldable (for_)
 import Data.Vector.Mutable (MVector)
 import qualified Data.Vector.Mutable as MV
 
@@ -15,38 +18,49 @@ import Decor.Soup.SimpleRandom
 newtype Stream m s = Stream { unStream :: m (Maybe (s, Stream m s)) }
 
 streamingSearch
-  :: (WithParams, WithRandomSearchParams, PrimMonad m, MonadRandom m)
+  :: (WithParams, WithRandomSearchParams, PrimMonad m, MonadRandom m, MonadRef r m)
   => Int -> Stream m S1
 streamingSearch n = Stream $ do
   v <- MV.unsafeNew n
-  MV.write v 0 treeH1
+  MV.write v 0 (treeH1, maxDepth, Nothing)
   streamingSearch' v 1
 
 streamingSearch'
-  :: (PrimMonad m, MonadRandom m, WithRandomSearchParams)
-  => MVector (PrimState m) (Tree_ s)
+  :: (PrimMonad m, MonadRandom m, MonadRef r m, WithRandomSearchParams)
+  => MVector (PrimState m) (Tree_ s, Int, Maybe (r Bool))
   -> Int
   -> m (Maybe (s, Stream m s))
 streamingSearch' _ 0 = return Nothing
 streamingSearch' v n = do
   i <- getRandomR (0, n-1)
-  t <- MV.unsafeRead v i
+  (t, d, m) <- MV.unsafeRead v i
   let clear k = do
         when (i < n - 1) $ MV.unsafeWrite v i =<< MV.unsafeRead v (n - 1)
         MV.unsafeWrite v (n - 1) undefined
         k (streamingSearch' v (n - 1))
+  late <- case m of
+    Just r -> readRef r
+    Nothing -> return False
   case t of
-    Pure s -> clear (\continue -> return (Just (s, Stream continue)))
+    _ | d == 0 || late -> clear id
+    Pure s -> do
+      for_ m $ \r -> writeRef r True
+      clear (\continue -> return (Just (s, Stream continue)))
     Free f -> case f of
       Tag _ t -> do
-        MV.unsafeWrite v i t
+        MV.unsafeWrite v i (t, d-1, m)
         streamingSearch' v n
       Pick _ xs@(_ : _) -> do
-        t : ts <- shuffle maxTries (fmap snd xs)
-        MV.unsafeWrite v i t
+        tdm : ts <- shuffle maxTries [(t, d-1, m) | (_, t) <- xs]
+        MV.unsafeWrite v i tdm
         n <- append v n ts
         streamingSearch' v n
-      _ -> clear id
+      Check t -> do
+        r <- newRef False
+        MV.unsafeWrite v i (t, d-1, m <|> Just r)
+        streamingSearch' v n
+      Fail _ -> clear id
+      Pick _ [] -> clear id
 
 shuffle :: MonadRandom m => Int -> [a] -> m [a]
 shuffle k xs = shuffle' k xs (length xs)

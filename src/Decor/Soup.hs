@@ -21,7 +21,7 @@
 module Decor.Soup where
 
 import Control.Applicative
-import Control.Monad
+import Control.Monad hiding (fail)
 import Control.Monad.Except
 import Control.Monad.Fail as MonadFail
 import Control.Monad.Writer
@@ -31,6 +31,7 @@ import Control.Comonad.Cofree
 import Data.List (elemIndex)
 import Data.Maybe
 import Data.Typeable
+import Text.Read (readMaybe)
 
 import Data.Bimap (Bimap)
 import qualified Data.Bimap as Bimap
@@ -47,7 +48,7 @@ import Decor.Types
 data Soup
 
 type instance RelT Soup = Rel
-type instance FunT Soup = FunId
+type instance FunT Soup = Constant
 type instance VarT Soup = DeBruijnV
 type instance BindVarT Soup = ()
 type instance CVarT Soup = DeBruijnC
@@ -57,6 +58,12 @@ type instance Coercion Soup = CoercionId
 
 newtype DeBruijnV = DeBruijnV Integer
   deriving (Eq, Ord, Show, Enum)
+
+data Constant
+  = Nat
+  | Zero
+  | Succ
+  deriving (Eq, Ord, Read, Show)
 
 shift :: DeBruijnV -> Shift -> DeBruijnV
 shift (DeBruijnV i) s = DeBruijnV (i + s)
@@ -110,6 +117,7 @@ data Params = Params
   , _jumping :: Int
   , _iniTerm :: P.DCore
   , _iniType :: P.DCore
+  , _noConstants :: Bool
   } deriving Generic
 
 ini :: MonadSoup m => DCId -> P.DCore -> m [K]
@@ -117,30 +125,47 @@ ini = ini' []
 
 ini' :: MonadSoup m => [String] -> DCId -> P.DCore -> m [K]
 ini' _ _ Nothing = return []
-ini' ctx t (Just t_) = case t_ of
-  Star -> return [KEqDC t (RHSHead Star)]
+ini' ctx t (Just t_) = do
+  (h, ks) <- ini'' ctx t_
+  return (KEqDC t (RHSHead h) : ks)
+
+ini'' :: MonadSoup m => [String] -> DCore_ P.Partial -> m (DCore_ Soup, [K])
+ini'' ctx t_ = case t_ of
+  Star -> return (Star, [])
+
+  Fun c_
+    | Just c <- readMaybe c_ -> return (Fun c, [])
+    | otherwise -> MonadFail.fail $ "Unknown constant: " ++ c_
 
   Var v
-    | Just i <- elemIndex v ctx -> return [KEqDC t (RHSHead (Var (DeBruijnV (fromIntegral i))))]
+    | Just i <- elemIndex v ctx -> return
+        ( Var (DeBruijnV (fromIntegral i))
+        , [] )
     | otherwise -> MonadFail.fail $ "Unbound: " ++ v
 
   Pi rel v t1_ t2_ -> do
     (t1, t2) <- freshes
     k1 <- ini' ctx t1 t1_
     k2 <- ini' (v : ctx) t2 t2_
-    return (KEqDC t (RHSHead (Pi rel () t1 t2)) : k1 ++ k2)
+    return
+      ( Pi rel () t1 t2
+      , k1 ++ k2 )
 
   Abs rel v t1_ t2_ -> do
     (t1, t2) <- freshes
     k1 <- ini' ctx t1 t1_
     k2 <- ini' (v : ctx) t2 t2_
-    return (KEqDC t (RHSHead (Abs rel () t1 t2)) : k1 ++ k2)
+    return
+      ( Abs rel () t1 t2
+      , k1 ++ k2 )
 
   App t1_ t2_ rel -> do
     (t1, t2) <- freshes
     k1 <- ini' ctx t1 t1_
     k2 <- ini' ctx t2 t2_
-    return (KEqDC t (RHSHead (App t1 t2 rel)) : k1 ++ k2)
+    return
+      ( App t1 t2 rel
+      , k1 ++ k2 )
 
 type WithParams = (?params :: Params)
 
@@ -161,6 +186,9 @@ pruning = _pruning ?params
 
 jumping :: WithParams => Int
 jumping = _jumping ?params
+
+noConstants :: WithParams => Bool
+noConstants = _noConstants ?params
 
 kEqDC :: DCId -> RHS -> K
 kEqDC = KEqDC
@@ -239,8 +267,21 @@ data Ctx = Ctx
   , cVarCtx :: [EqProp DCId]
   } deriving (Eq, Ord, Show)
 
+t0 : ty0 : star0 : nat0 : natToNat0 : zero0 : succ0 = DCId <$> [-1, -2 ..] :: [DCId]
+
 emptyCtx :: Ctx
 emptyCtx = Ctx [] []
+
+k0 :: [K]
+k0 =
+  -- Initial constraint
+  --  |- t0 : ty0
+  [ KType emptyCtx t0 ty0
+
+  -- Constants
+  , KEqDC nat0 (RHSHead (Fun Nat))
+  ]
+
 
 data Ctx' = Ctx' [DeBruijnC]
   deriving (Eq, Ord, Show)
@@ -260,14 +301,21 @@ insertVar ty ctx = ctx { varCtx = ty : varCtx ctx }
 insertCVar :: EqProp DCId -> Ctx -> Ctx
 insertCVar phi ctx = ctx { cVarCtx = phi : cVarCtx ctx }
 
-typeCheck :: MonadSoup m => Ctx -> DCId -> DCId -> m [K]
-typeCheck ctx t tyT = pick "Head"
+typeCheck :: (WithParams, MonadSoup m) => Ctx -> DCId -> DCId -> m [K]
+typeCheck ctx t tyT = do
+  h <- join $ pick "Head" $ heads ctx
+  (kEqDC t (RHSHead h) :) <$> typeCheck' ctx tyT h
+
+heads :: (WithParams, MonadSoup m) => Ctx -> [(L, m (DCore_ Soup))]
+heads ctx =
   [ (L "*", return Star)
   , (L "v", pickVar ctx <&> \x -> Var x)
   , (L "Π", pick' "Rel" [Rel, Irr] >>= \rel -> freshes <&> \(tyA, tyB) -> Pi rel () tyA tyB)
   , (L "λ", pick' "Rel" [Rel, Irr] >>= \rel -> freshes <&> \(tyA, b) -> Abs rel () tyA b)
   , (L ";", pick' "Rel" [Rel, Irr] >>= \rel -> freshes <&> \(b, a) -> App b a rel)
-  ] >>= \h_ -> h_ >>= \h -> (kEqDC t (RHSHead h) :) <$> typeCheck' ctx tyT h
+  ] ++
+  [ (L "f", Fun <$> pick' "Constant" [Nat, Zero, Succ])
+  | not noConstants ]
   where
     (<&>) :: Functor f => f a -> (a -> b) -> f b
     (<&>) = flip fmap
@@ -277,6 +325,11 @@ typeCheck' _ctx tyT Star = do
   return
     [ kEqDC tyT (RHSHead Star)
     ]
+
+typeCheck' _ctx tyT (Fun c) = case c of
+  Nat      -> return [ kEqDC tyT (RHSHead Star) ]
+  Zero     -> return [ kEqDC tyT (RHSHead (Fun Nat)) ]
+  Succ     -> return [ kEqDC tyT (RHSHead (Pi Rel () nat0 nat0)) ]
 
 typeCheck' ctx tyT (Var x) = do
   case lookupVar x ctx of
@@ -399,6 +452,7 @@ instance Lns "ks" (S h) h where
 showDCoreSoup_ :: WithParams => (Int -> DCId -> String) -> Int -> DCore_ Soup -> String
 showDCoreSoup_ showDCId n t = case t of
   Star -> "*"
+  Fun c -> show c
   Var n -> showDeBruijnV n
   App t u rel ->
     parensIf (n >= 11) $

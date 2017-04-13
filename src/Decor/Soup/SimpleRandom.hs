@@ -21,6 +21,7 @@ import Decor.Soup.Simple
 data RandomSearchParams = RandomSearchParams
   { _maxFuel :: Int  -- Number of failures
   , _maxTries :: Int  -- Max branching factor
+  , _maxDepth :: Int  -- Search depth
   }
 
 type WithRandomSearchParams = (?randomSearchParams :: RandomSearchParams)
@@ -31,10 +32,13 @@ getFuel = _maxFuel ?randomSearchParams
 maxTries :: WithRandomSearchParams => Int
 maxTries = _maxTries ?randomSearchParams
 
+maxDepth :: WithRandomSearchParams => Int
+maxDepth = _maxDepth ?randomSearchParams
+
 randomSearch
   :: (WithParams, WithRandomSearchParams, MonadCatch m, MonadRandom m, MonadLogS Log m)
   => m (Either (String, S1) S1)
-randomSearch = randomSearch' getFuel initS1 ok fail treeH1
+randomSearch = randomSearch' getFuel maxDepth initS1 ok fail treeH1
   where
     ok s = return (Right s)
     fail _ e s = return (Left (e, s))
@@ -43,19 +47,22 @@ randomSearch'
   :: forall m s r
   .  (MonadCatch m, MonadRandom m, MonadLogS (Int, s) m, WithRandomSearchParams)
   => Int
+  -> Int
   -> s
   -> (s -> m r)
   -> (Int -> String -> s -> m r)
   -> Tree_ s
   -> m r
-randomSearch' fuel s ok fail t = handle h $ case t of
+randomSearch' fuel depth s ok fail t = handle h $ case t of
   Pure s -> ok s
+  _ | depth == 0 -> fail fuel "Max depth reached" s
   Free f -> case f of
     Tag _ (Free (Tag s' _)) -> fail (fuel-1) "Potential occurs-fail" s'
-    Tag s' t' -> logS (fuel, s') >> randomSearch' fuel s' ok fail t'
+    Tag s' t' -> logS (fuel, s') >> randomSearch' fuel (depth-1) s' ok fail t'
     Fail e -> fail (fuel-1) e s
-    Pick _ [(_, t')] -> randomSearch' fuel s ok fail t'
+    Pick _ [(_, t')] -> randomSearch' fuel (depth-1) s ok fail t'
     Pick x ys -> randomPick maxTries fuel x ys (length ys)
+    Check t' -> randomSearch' fuel (depth-1) s ok fail t'
   where
 
     h ThreadKilled = fail 0 "KILL" s
@@ -72,7 +79,7 @@ randomSearch' fuel s ok fail t = handle h $ case t of
               fail 0 ("[" ++ x ++ ":" ++ show y ++ "]\n" ++ e) s
             else
               randomPick (triesLeft - 1) fuel x (ys0 ++ ys1) (n - 1)
-      randomSearch' fuel s ok fail' t'
+      randomSearch' fuel (depth-1) s ok fail' t'
 
 type Log = (Int, S1)
 

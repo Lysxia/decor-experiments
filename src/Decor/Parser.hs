@@ -5,6 +5,7 @@
 
 module Decor.Parser where
 
+import Data.Char (isUpper)
 import Data.Foldable
 import Text.Megaparsec
 import qualified Text.Megaparsec.Lexer as L
@@ -18,7 +19,7 @@ type instance VarT  Partial = String
 type instance BindVarT Partial = String
 type instance RelT Partial = Rel
 type instance DC.DCore Partial = DCore
-type instance FunT  Partial = ()
+type instance FunT  Partial = String
 type instance CVarT Partial = ()
 type instance BindCVarT Partial = ()
 type instance Coercion Partial = ()
@@ -46,7 +47,7 @@ parseSimpleDCore =
     [ symbol "*" *> return Star
     , parseForall
     , parseFun
-    , Var <$> parseVar
+    , funOrVar <$> parseVar
     ]
 
 parseForall :: Parser (DCore_ Partial)
@@ -62,6 +63,10 @@ parseFun = do
   ty <- symbol ":" *> parseDCore
   t <- symbol "->" *> parseDCore
   return (Abs Rel v ty t)
+
+funOrVar :: String -> DCore_ Partial
+funOrVar s | isUpper (head s) = Fun s
+funOrVar s = Var s
 
 parseVar :: Parser String
 parseVar = lexeme (try (some alphaNumChar))
