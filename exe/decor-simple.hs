@@ -31,6 +31,7 @@ data RunMode = Gen | Streaming | RunApp deriving (Generic, Read, Show)
 data Options = Options
   { _mode :: RunMode
   , _out :: Maybe String
+  , _eout :: Maybe String
   , _secs :: Maybe Int
   , _width :: Maybe Int
   , _iter :: Maybe Int
@@ -145,9 +146,13 @@ search opts = do
         xs <- readMVar log
         return $ do
           Just (fuel, s) <- xs
-          [replicate 30 '=', show fuel, showCurrentDerivation s]
+          [   replicate 30 '='
+            , show fuel
+            , showSolution s
+            , showCurrentDerivation s
+            ]
   let h BlockedIndefinitelyOnMVar =
-        for_ (_out opts) $ \file -> do
+        for_ (_eout opts) $ \file -> do
           writeFile file . unlines =<< history
           putStrLn $ "Search sample written to " ++ file
   handle h $ do
@@ -162,7 +167,7 @@ search opts = do
           writeFile file $ showCurrentDerivation s
           putStrLn $ "Derivation written to " ++ file
       Left (e, s) ->
-        for_ (_out opts) $ \file -> do
+        for_ (_eout opts) $ \file -> do
           history <- history
           writeFile file . unlines $
             [ "FAIL"
