@@ -22,6 +22,7 @@ data RandomSearchParams = RandomSearchParams
   { _maxFuel :: Int  -- Number of failures
   , _maxTries :: Int  -- Max branching factor
   , _maxDepth :: Int  -- Search depth
+  , _varWeight :: Int  -- Increase probability of choosing a variable
   }
 
 type WithRandomSearchParams = (?randomSearchParams :: RandomSearchParams)
@@ -34,6 +35,9 @@ maxTries = _maxTries ?randomSearchParams
 
 maxDepth :: WithRandomSearchParams => Int
 maxDepth = _maxDepth ?randomSearchParams
+
+varWeight :: WithRandomSearchParams => Int
+varWeight = _varWeight ?randomSearchParams
 
 randomSearch
   :: (WithParams, WithRandomSearchParams, MonadCatch m, MonadRandom m, MonadLogS Log m)
@@ -61,7 +65,9 @@ randomSearch' fuel depth s ok fail t = handle h $ case t of
     Tag s' t' -> logS (fuel, s') >> randomSearch' fuel (depth-1) s' ok fail t'
     Fail e -> fail (fuel-1) e s
     Pick _ [(_, t')] -> randomSearch' fuel (depth-1) s ok fail t'
-    Pick x ys -> randomPick maxTries fuel x ys (length ys)
+    Pick x ys ->
+      let wys = [(weight t, (y, t)) | (y, t) <- ys]
+      in randomPick maxTries fuel x wys ((sum . fmap fst) wys)
     Check t' -> randomSearch' fuel (depth-1) s ok fail t'
   where
 
@@ -69,17 +75,22 @@ randomSearch' fuel depth s ok fail t = handle h $ case t of
     h UserInterrupt = fail 0 "INT" s
     h e = throwM e
 
-    randomPick :: Show x => Int -> Int -> String -> [(x, Tree_ s)] -> Int -> m r
+    randomPick :: Show x => Int -> Int -> String -> [(Int, (x, Tree_ s))] -> Int -> m r
     randomPick triesLeft fuel x _ n | n == 0 || triesLeft == 0 = fail (fuel - 1) (show x) s
-    randomPick triesLeft fuel x ys n = do
+    randomPick triesLeft fuel x wys n = do
       w <- getRandomR (0, n - 1)
-      let (ys0, (y, t') : ys1) = splitAt w ys
+      go w [] wys $ \(w', (y, t')) wys' ->
+        let
           fail' fuel e s =
             if fuel == 0 then
               fail 0 ("[" ++ x ++ ":" ++ show y ++ "]\n" ++ e) s
             else
-              randomPick (triesLeft - 1) fuel x (ys0 ++ ys1) (n - 1)
-      randomSearch' fuel (depth-1) s ok fail' t'
+              randomPick (triesLeft - 1) fuel x wys' (n - w')
+        in randomSearch' fuel (depth-1) s ok fail' t'
+    go w wys0 (wy@(w', _) : wys1) k
+      | w < w' = k wy (wys0 ++ wys1)
+      | otherwise = go (w - w') (wy : wys0) wys1 k
+    go _ _ [] _ = error "assert false"
 
 type Log = (Int, S1)
 
@@ -94,3 +105,12 @@ newtype LogS a = LogS (ReaderT (MVar Log) IO a)
 
 runLogS :: MVar Log -> LogS a -> IO a
 runLogS m (LogS r) = runReaderT r m
+
+weight :: WithRandomSearchParams => Tree_ s -> Int
+weight = weight' 3
+
+weight' :: WithRandomSearchParams => Int -> Tree_ s -> Int
+weight' _ (Free (Pick "Var" _)) = varWeight
+weight' 0 _ = 1
+weight' n (Free (Tag _ t)) = weight' (n-1) t
+weight' _ _ = 1

@@ -51,7 +51,7 @@ streamingSearch' v n = do
         MV.unsafeWrite v i (t, d-1, m)
         streamingSearch' v n
       Pick _ xs@(_ : _) -> do
-        tdm : ts <- shuffle maxTries [(t, d-1, m) | (_, t) <- xs]
+        tdm : ts <- shuffle maxTries [(weight t, (t, d-1, m)) | (_, t) <- xs]
         MV.unsafeWrite v i tdm
         n <- append v n ts
         streamingSearch' v n
@@ -62,14 +62,18 @@ streamingSearch' v n = do
       Fail _ -> clear id
       Pick _ [] -> clear id
 
-shuffle :: MonadRandom m => Int -> [a] -> m [a]
-shuffle k xs = shuffle' k xs (length xs)
+shuffle :: MonadRandom m => Int -> [(Int, a)] -> m [a]
+shuffle k xs = shuffle' k xs ((sum . fmap fst) xs)
   where
     shuffle' k _ n | k == 0 || n == 0 = return []
-    shuffle' k xs n = do
+    shuffle' k as n = do
       i <- getRandomR (0, n-1)
-      let (xs0, x : xs1) = splitAt i xs
-      fmap (x :) (shuffle' k (xs0 ++ xs1) (n - 1))
+      go i [] as $ \j' a as' ->
+        fmap (a :) (shuffle' (k-1) as' (n - j'))
+    go i as0 ((j, a) : as1) kont
+      | i < j = kont j a (as0 ++ as1)
+      | otherwise = go (i - j) ((j, a) : as0) as1 kont
+    go _ _ [] _ = error "assert false"
 
 append :: PrimMonad m => MVector (PrimState m) a -> Int -> [a] -> m Int
 append v n (a : as) | n < MV.length v = do

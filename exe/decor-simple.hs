@@ -37,6 +37,7 @@ data Options = Options
   , __fuel :: Maybe Int
   , __tries :: Maybe Int
   , __depth :: Maybe Int
+  , __varWeight :: Maybe Int
   , __showEqualities :: Bool
   , __relevance :: Bool
   , __boring :: Bool
@@ -72,6 +73,7 @@ defaultRSP opts = RandomSearchParams
   { _maxFuel = fromMaybe 100 (__fuel opts)
   , _maxTries = fromMaybe 100 (__tries opts)
   , _maxDepth = fromMaybe 100 (__depth opts)
+  , _varWeight = fromMaybe 5 (__varWeight opts)
   }
 
 defaultParams opts = do
