@@ -38,6 +38,7 @@ data Options = Options
   , __tries :: Maybe Int
   , __depth :: Maybe Int
   , __varWeight :: Maybe Int
+  , __pickTypeOnce :: Bool
   , __showEqualities :: Bool
   , __relevance :: Bool
   , __boring :: Bool
@@ -75,6 +76,7 @@ defaultRSP opts = RandomSearchParams
   , _maxTries = fromMaybe 100 (__tries opts)
   , _maxDepth = fromMaybe 100 (__depth opts)
   , _varWeight = fromMaybe 5 (__varWeight opts)
+  , _pickTypeOnce = __pickTypeOnce opts
   }
 
 defaultParams opts = do

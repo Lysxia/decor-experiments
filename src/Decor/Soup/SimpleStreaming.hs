@@ -50,6 +50,11 @@ streamingSearch' v n = do
       Tag _ t -> do
         MV.unsafeWrite v i (t, d-1, m)
         streamingSearch' v n
+      Pick "Type" ts | pickTypeOnce -> do
+        i <- getRandomR (0, length ts - 1)
+        let (_, t) : _ = drop i ts
+        MV.unsafeWrite v i (t, d-1, m)
+        streamingSearch' v n
       Pick _ xs@(_ : _) -> do
         tdm : ts <- shuffle maxTries [(weight t, (t, d-1, m)) | (_, t) <- xs]
         MV.unsafeWrite v i tdm

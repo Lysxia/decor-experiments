@@ -23,6 +23,7 @@ data RandomSearchParams = RandomSearchParams
   , _maxTries :: Int  -- Max branching factor
   , _maxDepth :: Int  -- Search depth
   , _varWeight :: Int  -- Increase probability of choosing a variable
+  , _pickTypeOnce :: Bool
   }
 
 type WithRandomSearchParams = (?randomSearchParams :: RandomSearchParams)
@@ -38,6 +39,9 @@ maxDepth = _maxDepth ?randomSearchParams
 
 varWeight :: WithRandomSearchParams => Int
 varWeight = _varWeight ?randomSearchParams
+
+pickTypeOnce :: WithRandomSearchParams => Bool
+pickTypeOnce = _pickTypeOnce ?randomSearchParams
 
 randomSearch
   :: (WithParams, WithRandomSearchParams, MonadCatch m, MonadRandom m, MonadLogS Log m)
@@ -65,6 +69,11 @@ randomSearch' fuel depth s ok fail t = handle h $ case t of
     Tag s' t' -> logS (fuel, s') >> randomSearch' fuel (depth-1) s' ok fail t'
     Fail e -> fail (fuel-1) e s
     Pick _ [(_, t')] -> randomSearch' fuel (depth-1) s ok fail t'
+    Pick "Type" ys | pickTypeOnce -> do
+      i <- getRandomR (0, length ys - 1)
+      let (y, t') : _ = drop i ys
+          fail' fuel e s = fail fuel ("{" ++ show y ++ "}\n" ++ e) s
+      randomSearch' fuel (depth-1) s ok fail' t'
     Pick x ys ->
       let wys = [(weight t, (y, t)) | (y, t) <- ys]
       in randomPick maxTries fuel x wys ((sum . fmap fst) wys)
@@ -75,7 +84,7 @@ randomSearch' fuel depth s ok fail t = handle h $ case t of
     h UserInterrupt = fail 0 "INT" s
     h e = throwM e
 
-    randomPick :: Show x => Int -> Int -> String -> [(Int, (x, Tree_ s))] -> Int -> m r
+    randomPick :: Show y => Int -> Int -> String -> [(Int, (y, Tree_ s))] -> Int -> m r
     randomPick triesLeft fuel x _ n | n == 0 || triesLeft == 0 = fail (fuel - 1) (show x) s
     randomPick triesLeft fuel x wys n = do
       w <- getRandomR (0, n - 1)
