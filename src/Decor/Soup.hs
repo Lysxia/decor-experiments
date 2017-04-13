@@ -269,7 +269,7 @@ data Ctx = Ctx
   } deriving (Eq, Ord, Show)
 
 t0 : ty0 : nat0 : etc1 = DCId <$> [-1, -2 ..] :: [DCId]
-foldNat0 : etc2 = etc1
+foldNatTy0 : etc2 = etc1
 
 emptyCtx :: Ctx
 emptyCtx = Ctx [] []
@@ -290,8 +290,8 @@ constants =
   [ (nat0, Just (Fun "Nat"))
 
   -- forall (r : *). Nat -> r -> (r -> r) -> r
-  , (foldNat0, (\(Right r) -> r) (P.parseDC
-      "forall r : * . forall n : Nat . forall z : r . forall s : (forall m : r . r) . r"))
+  , (foldNatTy0, (\(Right r) -> r) (P.parseDC
+      "forall r : * . forall z : r . forall s : (forall m : r . r) . forall n : Nat . r"))
   ]
 
 data Ctx' = Ctx' [DeBruijnC]
@@ -341,7 +341,7 @@ typeCheck' _ctx tyT (Fun c) = case c of
   Nat      -> return [ kEqDC tyT (RHSHead Star) ]
   Zero     -> return [ kEqDC tyT (RHSHead (Fun Nat)) ]
   Succ     -> return [ kEqDC tyT (RHSHead natToNatTyDC) ]
-  FoldNat  -> return [ kEqDC tyT (RHSId foldNat0 0) ]
+  FoldNat  -> return [ kEqDC tyT (RHSId foldNatTy0 0) ]
 
 typeCheck' ctx tyT (Var x) = do
   case lookupVar x ctx of
