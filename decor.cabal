@@ -32,7 +32,7 @@ library
     bimap,
     exceptions,
     free,
-    one-liner,
+    one-liner >= 0.8.1,
     containers,
     kan-extensions,
     megaparsec,
@@ -60,7 +60,7 @@ executable decor
     brick,
     containers,
     free,
-    optparse-generic,
+    optparse-generic >= 1.1.5,
     vty,
     decor
   ghc-options: -threaded -rtsopts
