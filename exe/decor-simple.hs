@@ -1,6 +1,10 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TypeFamilies #-}
 
 import Brick
 import Graphics.Vty (Key(..), Event(..), Modifier(..), defAttr)
@@ -28,29 +32,31 @@ import Decor.Soup.SimpleStreaming
 
 data RunMode = Gen | Streaming | RunApp deriving (Generic, Read, Show)
 
-data Options = Options
-  { _mode :: RunMode
-  , _out :: Maybe String
-  , _eout :: Maybe String
-  , _secs :: Maybe Int
-  , _width :: Maybe Int
-  , _iter :: Maybe Int
-  , __fuel :: Maybe Int
-  , __tries :: Maybe Int
-  , __depth :: Maybe Int
-  , __varWeight :: Maybe Int
-  , __pickTypeOnce :: Bool
-  , __showEqualities :: Bool
-  , __relevance :: Bool
-  , __boring :: Bool
-  , __absurd :: Bool
-  , __pruning :: Maybe Int
-  , __jumping :: Maybe Int
-  , __iniTerm :: Maybe String
-  , __iniType :: Maybe String
-  , __noConstants :: Bool
-  , __guessSub :: Bool
+data Options_ w = Options
+  { _mode :: w ::: RunMode <?> "RunApp,Gen,Streaming"
+  , _out :: w ::: Maybe String <?> "Output file"
+  , _eout :: w ::: Maybe String <?> "Error output file"
+  , _secs :: w ::: Maybe Int <?> "Timeout"
+  , _width :: w ::: Maybe Int <?> "Queue size (Streaming)"
+  , _iter :: w ::: Maybe Int <?> "Number of iterations (Streaming)"
+  , __fuel :: w ::: Maybe Int <?> "Backtracking fuel"
+  , __tries :: w ::: Maybe Int <?> "Reduce the number of children of a node"
+  , __depth :: w ::: Maybe Int <?> "Depth bound"
+  , __varWeight :: w ::: Maybe Int <?> "Increase weight on variables"
+  , __pickTypeOnce :: w ::: Bool <?> "Do not backtrack on choosing a typing constraint to reduce"
+  , __showEqualities :: w ::: Bool <?> "Show equality constraints in derivation"
+  , __relevance :: w ::: Bool <?> "Variable relevance for Dependent Core"
+  , __boring :: w ::: Bool <?> "Generate types"
+  , __absurd :: w ::: Bool <?> "Allow parameters of type forall a. a"
+  , __pruning :: w ::: Maybe Int <?> "Prune out dead ends"
+  , __jumping :: w ::: Maybe Int <?> "Fold linear branches"
+  , __iniTerm :: w ::: Maybe String <?> "Initial partial term"
+  , __iniType :: w ::: Maybe String <?> "Initial partial type"
+  , __noConstants :: w ::: Bool <?> "Disable generating constants"
+  , __guessSub :: w ::: Bool <?> "Perform reverse substitutions"
   } deriving Generic
+
+type Options = Options_ Unwrapped
 
 _file :: Options -> String
 _file = fromMaybe "decor-log" . _out
@@ -59,11 +65,11 @@ instance ParseField RunMode where
 instance ParseFields RunMode where
 instance ParseRecord RunMode where
 
-instance ParseRecord Options where
+instance ParseRecord (Options_ Wrapped) where
   parseRecord = parseRecordWithModifiers lispCaseModifiers
 
 main = do
-  opts <- getRecord "decor"
+  opts <- unwrapRecord "decor"
   params <- defaultParams opts
   let ?params = params
       ?randomSearchParams = defaultRSP opts
