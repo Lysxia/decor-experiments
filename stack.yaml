@@ -1,0 +1,9 @@
+resolver: lts-8.8
+packages:
+- '.'
+extra-deps:
+  - 'one-liner-0.8.1'
+  - 'QuickCheck-GenT-0.2.0'
+  - 'optparse-generic-1.1.5'
+flags: {}
+extra-package-dbs: []
