@@ -358,10 +358,10 @@ refresh h n m k = case h of
     (b', a') <- freshes
     return (App b' a' rel, [k b b' n m, k a a' n m])
 
-reduceH1 :: MonadChoice m => m ()
+reduceH1 :: (WithParams, MonadChoice m) => m ()
 reduceH1 = use ksH1 >>= reduceH1'
 
-reduceH1' :: MonadChoice m => [K1] -> m ()
+reduceH1' :: (WithParams, MonadChoice m) => [K1] -> m ()
 reduceH1' = loop
   where
     loop ks = tag >> do
@@ -372,7 +372,7 @@ reduceH1' = loop
       else
         return ()
 
-reduceAtomH1_ :: MonadChoice m => K1 -> m [K1]
+reduceAtomH1_ :: (WithParams, MonadChoice m) => K1 -> m [K1]
 reduceAtomH1_ k = do
   ks <- reduceAtomH1 k
   case ks of
@@ -381,7 +381,7 @@ reduceAtomH1_ k = do
       updateHistory k ks
       return ks
 
-reduceAtomH1 :: MonadChoice m => K1 -> m [K1]
+reduceAtomH1 :: (WithParams, MonadChoice m) => K1 -> m [K1]
 reduceAtomH1 (K1Eq u (Id_ v) 0 (DeBruijnV 0)) | u == v = return []
 reduceAtomH1 k@(K1Eq u (Id_ v) n m) = do
   eqns <- use eqnsH1
@@ -408,8 +408,7 @@ reduceAtomH1 k@(K1Sub u v w n') = do
     Just h -> do
       (h', ks) <- refresh h (-1) n' $ \v v' _ n' -> K1Sub v' v w n'
       return (k1EqDC u h' : ks)
-    -- Nothing -> return [k]
-    Nothing -> case Map.lookup u eqns of
+    Nothing | guessSub -> case Map.lookup u eqns of
       Just h -> do
         let left = return (Var n', [k1EqId u w n (toEnum 0)])
             right = refresh h 1 n' $ \v v' _ n' -> K1Sub v v' w n'
@@ -420,6 +419,7 @@ reduceAtomH1 k@(K1Sub u v w n') = do
         eqnsH1 %= Map.insert v h'
         return ks
       Nothing -> return [k]
+    Nothing -> return [k]
 reduceAtomH1 k@(K1Type ctx u v) = do
   eqns <- use eqnsH1
   case Map.lookup u eqns of

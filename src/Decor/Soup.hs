@@ -119,6 +119,7 @@ data Params = Params
   , _iniTerm :: P.DCore
   , _iniType :: P.DCore
   , _noConstants :: Bool
+  , _guessSub :: Bool
   } deriving Generic
 
 ini :: MonadSoup m => DCId -> P.DCore -> m [K]
@@ -190,6 +191,9 @@ jumping = _jumping ?params
 
 noConstants :: WithParams => Bool
 noConstants = _noConstants ?params
+
+guessSub :: WithParams => Bool
+guessSub = _guessSub ?params
 
 kEqDC :: DCId -> RHS -> K
 kEqDC = KEqDC

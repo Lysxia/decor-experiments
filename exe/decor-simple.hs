@@ -47,6 +47,7 @@ data Options = Options
   , __iniTerm :: Maybe String
   , __iniType :: Maybe String
   , __noConstants :: Bool
+  , __guessSub :: Bool
   } deriving Generic
 
 _file :: Options -> String
@@ -89,6 +90,7 @@ defaultParams opts = do
     , _iniTerm = join iniT
     , _iniType = join iniTy
     , _noConstants = __noConstants opts
+    , _guessSub = __guessSub opts
     }
 
 parse s = case P.parseDC s of
