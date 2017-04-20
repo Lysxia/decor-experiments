@@ -109,6 +109,9 @@ class MonadLogS s m where
 instance MonadLogS Log LogS where
   logS s = LogS $ ReaderT $ \m -> tryTakeMVar m >> putMVar m s >> return ()
 
+instance MonadLogS s IO where
+  logS _ = return ()
+
 newtype LogS a = LogS (ReaderT (MVar Log) IO a)
   deriving (Functor, Applicative, Monad, MonadThrow, MonadCatch, MonadRandom)
 
