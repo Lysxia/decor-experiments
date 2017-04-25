@@ -29,7 +29,7 @@ import Decor.Soup.SimpleRandom
 import Decor.Soup.SimpleStreaming
 import Decor.Soup.Tree
 
-data RunMode = Gen | Streaming | RunApp deriving (Generic, Read, Show)
+data RunMode = Gen | Streaming | RunApp | Retry deriving (Generic, Read, Show)
 
 data Options_ w = Options
   { _mode :: w ::: RunMode <?> "RunApp;Gen;Streaming"
@@ -77,6 +77,7 @@ main = do
     Gen -> search opts
     RunApp -> runApp opts
     Streaming -> stream opts
+    Retry -> retry opts
 
 defaultRSP opts = RandomSearchParams
   { _maxFuel = fromMaybe 100 (__fuel opts)
@@ -134,6 +135,73 @@ streamWith n (Stream continue) h = do
       hPutStrLn h (showSolution s)
       streamWith (fmap (subtract 1) n) continue h
 
+retry opts = do
+  m <- newEmptyMVar
+  log <- newMVar []
+  result <- newEmptyMVar
+  tid <- forkIO $ mask $ \restore ->
+    restore (runLogS m randomSearch) >>= putMVar result
+  let loop 0 = killThread tid
+      loop n = do
+        threadDelay (10 ^ 6)
+        x <- tryTakeMVar m
+        modifyMVar_ log (return . (x :))
+        loop (n - 1)
+  tid2 <- forkIO $ loop (fromMaybe 10 (_secs opts))
+  let history = do
+        xs <- readMVar log
+        return $ do
+          Just (fuel, s) <- xs
+          [   replicate 30 '='
+            , show fuel
+            , showSolution s
+            , showCurrentDerivation s
+            ]
+  let h BlockedIndefinitelyOnMVar =
+        for_ (_eout opts) $ \file -> do
+          writeFile file . unlines =<< history
+          putStrLn $ "Search sample written to " ++ file
+  handle h $ do
+    s <- takeMVar result
+    xs <- readMVar log
+    killThread tid2
+    case s of
+      Right s -> do
+        -- putStrLn "SUCCESS\n"
+        -- putStrLn (showSolution s)
+        for_ (_out opts) $ \file -> do
+          writeFile file $ showCurrentDerivation s
+          putStrLn $ "Derivation written to " ++ file
+        case treeSolution s of
+          Nothing -> do
+            putStr "should not happen"
+            hFlush stdout
+            retry opts
+          Just (a, b) -> do
+            if typeOf a /= Just b then do
+              putStr "TERM: " >> print a
+              putStr "TYPE : " >> print (Just b)
+              putStr "TYPE': " >> print (typeOf a)
+            else if preservation a then
+              putStr "," >> hFlush stdout >> retry opts
+            else do
+              putStr "TERM: " >> print a
+              putStr "TYPE: " >> print b
+              putStr "STEPS TO: " >> print (step a)
+              putStr "OF TYPE: " >> print (typeOf <$> step a)
+      Left (e, s) -> do
+        for_ (_eout opts) $ \file -> do
+          history <- history
+          writeFile file . unlines $
+            [ "FAIL"
+            , showSolution s
+            , e
+            , showCurrentDerivation s
+            ] ++ history
+          putStrLn $ "Search state written to " ++ file
+        putStr "." >> retry opts
+
+
 search :: (WithParams, WithRandomSearchParams) => Options -> IO ()
 search opts = do
   m <- newEmptyMVar
@@ -184,6 +252,8 @@ search opts = do
             ] ++ history
           putStrLn $ "Search state written to " ++ file
 
+
+eval :: t -> S1 -> IO ()
 eval opts s =
   case treeSolution s of
     Just (a, b) -> do
@@ -193,8 +263,9 @@ eval opts s =
       for_ (step a) $ \t -> do
         print (typeOf t)
         print t
-      print (compileCPS a)
+      print (preservation a)
     Nothing -> return ()
+
 
 runApp :: WithParams => Options -> IO ()
 runApp opts = do

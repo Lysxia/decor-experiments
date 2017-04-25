@@ -40,6 +40,7 @@ treeDCore s t = do
 
 step :: DCore Tree -> Maybe (DCore Tree)
 step Star = Nothing
+-- step (Fun Zero) = Just (Abs Rel () (Fun Nat) (Fun Zero))
 step (Fun _) = Nothing
 step (Var _) = Nothing
 step (Pi _ _ _ _) = Nothing
@@ -50,6 +51,11 @@ step (App b a rel) =
     (_, Just b) -> Just (App b a rel)
     (Abs rel' () _ b, Nothing) | rel == rel' -> Just (sub a b)
     _ -> Nothing
+
+preservation :: DCore Tree -> Bool
+preservation t = case step t of
+    Just t' -> typeOf t == typeOf t'
+    Nothing -> True
 
 sub :: DCore Tree -> DCore Tree -> DCore Tree
 sub = sub' (DeBruijnV 0)
@@ -79,6 +85,7 @@ shiftTerm' n m a = case a of
   Abs rel () t1 t2 -> Abs rel () (shiftTerm' n m t1) (shiftTerm' n (shift m 1) t2)
   App t1 t2 rel -> App (shiftTerm' n m t1) (shiftTerm' n m t2) rel
 
+{-
 compileCPS :: DCore Tree -> DCore Tree
 compileCPS t = mkCPS t
 
@@ -91,13 +98,14 @@ mkCPS t =
         (shiftTerm (DeBruijnV 1) (typeOf t))
         (Var (DeBruijnV 1)))
       (App (Var (DeBruijnV 0)) (shiftTerm (DeBruijnV 2) t) Rel))
+-}
 
-typeOf :: DCore Tree -> DCore Tree
+typeOf :: DCore Tree -> Maybe (DCore Tree)
 typeOf = typeOf' []
 
-typeOf' _ Star = Star
-typeOf' _ (Pi _ _ _ _) = Star
-typeOf' _ (Fun f) = case f of
+typeOf' _ Star = Just Star
+typeOf' _ (Pi _ _ _ _) = Just Star
+typeOf' _ (Fun f) = Just $ case f of
   Nat -> Star
   Zero -> Fun Nat
   Succ -> Pi Rel () (Fun Nat) (Fun Nat)
@@ -109,10 +117,13 @@ typeOf' _ (Fun f) = case f of
         (Pi Rel ()
           (Pi Rel () (Var (DeBruijnV 1)) (Var (DeBruijnV 2)))
           (Pi Rel () (Fun Nat) (Var (DeBruijnV 3)))))
-typeOf' ctx (Var v@(DeBruijnV n)) = shiftTerm v (ctx !! fromIntegral n)
-typeOf' ctx (Abs rel () a b) = Pi rel () a (typeOf' (a : ctx) b)
+typeOf' ctx (Var v@(DeBruijnV n)) = case drop (fromIntegral n) ctx of
+  t : _ -> Just (shiftTerm (shift v 1) t)
+  [] -> Nothing
+typeOf' ctx (Abs rel () a b) = Pi rel () a <$> typeOf' (a : ctx) b
 typeOf' ctx (App b a rel) = case typeOf' ctx b of
-  Pi rel' () tyB tyC -> sub a tyC
+  Just (Pi rel' () tyB tyC) -> Just $ sub a tyC
+  Nothing -> Nothing
 
 unPartial :: P.DCore -> Maybe (DCore Tree)
 unPartial = unPartial_ []
