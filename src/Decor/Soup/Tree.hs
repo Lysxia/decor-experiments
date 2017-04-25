@@ -3,7 +3,11 @@
 module Decor.Soup.Tree where
 
 import Control.Applicative
+import Data.List (findIndex)
 import qualified Data.Map as Map
+import Text.Read (readMaybe)
+
+import qualified Decor.Parser as P
 import Decor.Soup
 import Decor.Soup.Simple
 import Decor.Types
@@ -73,3 +77,49 @@ shiftTerm' n m a = case a of
   Pi rel () t1 t2 -> Pi rel () (shiftTerm' n m t1) (shiftTerm' n (shift m 1) t2)
   Abs rel () t1 t2 -> Abs rel () (shiftTerm' n m t1) (shiftTerm' n (shift m 1) t2)
   App t1 t2 rel -> App (shiftTerm' n m t1) (shiftTerm' n m t2) rel
+
+compileCPS :: DCore Tree -> DCore Tree
+compileCPS t = mkCPS t
+
+mkCPS :: DCore Tree -> DCore Tree
+mkCPS t =
+  Abs Rel ()
+    Star
+    (Abs Rel ()
+      (Pi Rel ()
+        (shiftTerm (DeBruijnV 1) (typeOf t))
+        (Var (DeBruijnV 1)))
+      (App (Var (DeBruijnV 0)) (shiftTerm (DeBruijnV 2) t) Rel))
+
+typeOf :: DCore Tree -> DCore Tree
+typeOf = typeOf' []
+
+typeOf' _ Star = Star
+typeOf' _ (Pi _ _ _ _) = Star
+typeOf' _ (Fun f) = case f of
+  Nat -> Star
+  Zero -> Fun Nat
+  Succ -> Pi Rel () (Fun Nat) (Fun Nat)
+  FoldNat ->
+    Pi Rel ()
+      Star
+      (Pi Rel ()
+        (Var (DeBruijnV 0))
+        (Pi Rel ()
+          (Pi Rel () (Var (DeBruijnV 1)) (Var (DeBruijnV 2)))
+          (Pi Rel () (Fun Nat) (Var (DeBruijnV 3)))))
+typeOf' ctx (Var v@(DeBruijnV n)) = shiftTerm v (ctx !! fromIntegral n)
+typeOf' ctx (Abs rel () a b) = Pi rel () a (typeOf' (a : ctx) b)
+typeOf' ctx (App b a rel) = case typeOf' ctx b of
+  Pi rel' () tyB tyC -> sub a tyC
+
+unPartial :: P.DCore -> Maybe (DCore Tree)
+unPartial = unPartial_ []
+
+unPartial_ :: [String] -> P.DCore -> Maybe (DCore Tree)
+unPartial_ ctx (Just t) = unPartial' [] t
+unPartial_ _ Nothing = Nothing
+
+unPartial' :: [String] -> DCore_ P.Partial -> Maybe (DCore Tree)
+unPartial' ctx (Var v) = Var <$> DeBruijnV <$> fromIntegral <$> findIndex (== v) ctx
+unPartial' ctx (Fun f) = Fun <$> readMaybe f
