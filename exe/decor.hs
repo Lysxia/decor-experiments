@@ -33,7 +33,7 @@ import Decor.Soup.SimpleStreaming
 data RunMode = Gen | Streaming | RunApp deriving (Generic, Read, Show)
 
 data Options_ w = Options
-  { _mode :: w ::: RunMode <?> "RunApp,Gen,Streaming"
+  { _mode :: w ::: RunMode <?> "RunApp;Gen;Streaming"
   , _out :: w ::: Maybe String <?> "Output file"
   , _eout :: w ::: Maybe String <?> "Error output file"
   , _secs :: w ::: Maybe Int <?> "Timeout"
