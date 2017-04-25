@@ -188,7 +188,11 @@ eval opts s =
   case treeSolution s of
     Just (a, b) -> do
       print a
-      print (step a)
+      print b
+      print (typeOf a)
+      for_ (step a) $ \t -> do
+        print (typeOf t)
+        print t
       print (compileCPS a)
     Nothing -> return ()
 
