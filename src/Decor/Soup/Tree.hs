@@ -44,6 +44,7 @@ step (Fun _) = Nothing
 step (Var _) = Nothing
 step (Pi _ _ _ _) = Nothing
 step (Abs Irr () t a) = Abs Irr () t <$> step a
+step (Abs Rel _ _ _) = Nothing
 step (App b a rel) =
   case (b, step b) of
     (_, Just b) -> Just (App b a rel)
