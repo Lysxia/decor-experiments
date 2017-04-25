@@ -13,13 +13,11 @@ import Control.Concurrent
 import Control.Exception
 import Control.Monad
 import Control.Monad.Free
-import Data.Either
 import Data.Foldable
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.Maybe (fromMaybe)
 import Data.Traversable
 import Options.Generic
-import System.Environment (getArgs)
 import System.IO
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Map as Map
@@ -29,6 +27,7 @@ import Decor.Soup
 import Decor.Soup.Simple
 import Decor.Soup.SimpleRandom
 import Decor.Soup.SimpleStreaming
+import Decor.Soup.Tree
 
 data RunMode = Gen | Streaming | RunApp deriving (Generic, Read, Show)
 
@@ -68,6 +67,7 @@ instance ParseRecord RunMode where
 instance ParseRecord (Options_ Wrapped) where
   parseRecord = parseRecordWithModifiers lispCaseModifiers
 
+main :: IO ()
 main = do
   opts <- unwrapRecord "decor"
   params <- defaultParams opts
@@ -172,6 +172,7 @@ search opts = do
         for_ (_out opts) $ \file -> do
           writeFile file $ showCurrentDerivation s
           putStrLn $ "Derivation written to " ++ file
+        eval opts s
       Left (e, s) ->
         for_ (_eout opts) $ \file -> do
           history <- history
@@ -182,6 +183,14 @@ search opts = do
             , showCurrentDerivation s
             ] ++ history
           putStrLn $ "Search state written to " ++ file
+
+eval opts s =
+  case treeSolution s of
+    Just (a, b) -> do
+      print a
+      print (step a)
+      print (compileCPS a)
+    Nothing -> return ()
 
 runApp :: WithParams => Options -> IO ()
 runApp opts = do
