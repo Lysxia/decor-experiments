@@ -13,6 +13,7 @@ module Decor.Types.Convert where
 import Control.Applicative
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.List (elemIndex)
 import Text.Read (readEither)
 
 import Decor.Types
@@ -46,9 +47,9 @@ runPartialToTree = runReaderT . unPartialToTree
 
 instance Converter Partial Tree PartialToTree where
   convertVar v = partialToTree $ \ctx ->
-    case break (== v) ctx of
-      (_, []) -> Left $ "Unbound variable " ++ show v
-      (xs, _ : _) -> pure (DeBruijnV (fromIntegral (length xs)))
+    case elemIndex v ctx of
+      Nothing -> Left $ "Unbound variable " ++ show v
+      Just i -> pure (DeBruijnV (fromIntegral i))
   convertFun f = partialToTree $ \_ -> readEither f
   bindV v k = k () $ \f -> partialToTree $ \ctx -> runPartialToTree f (v : ctx)
   convert_ t = partialToTree $ \ctx ->

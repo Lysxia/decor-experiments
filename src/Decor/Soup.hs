@@ -24,6 +24,7 @@ import Control.Applicative
 import Control.Monad hiding (fail)
 import Control.Monad.Except
 import Control.Monad.Fail as MonadFail
+import Control.Monad.RWS
 import Control.Monad.Writer
 
 import Control.Comonad.Cofree
@@ -44,6 +45,7 @@ import GHC.TypeLits
 
 import qualified Decor.Parser as P
 import Decor.Types
+import Decor.Types.Convert
 
 -- | Constraints.
 data K where
@@ -83,52 +85,41 @@ data Params = Params
   , _guessSub :: Bool
   } deriving Generic
 
+newtype PartialToSoup m a = PartialToSoup
+  { unPartialToSoup :: RWST [String] [K] () m a }
+  deriving (Functor, Applicative, Monad, MonadFail)
+
+partialToSoup :: Functor m => ([String] -> m (a, [K])) -> PartialToSoup m a
+partialToSoup f = PartialToSoup . RWST $ \r () ->
+  fmap (\(a, ks) -> (a, (), ks)) (f r)
+
+runPartialToSoup :: Functor m => PartialToSoup m a -> [String] -> m (a, [K])
+runPartialToSoup m ctx =
+  fmap (\(a, (), ks) -> (a, ks)) (runRWST (unPartialToSoup m) ctx ())
+
+instance MonadSoup m => Converter Partial Soup (PartialToSoup m) where
+  convertVar v = partialToSoup $ \ctx ->
+    case elemIndex v ctx of
+      Nothing -> MonadFail.fail $ "Unbound variable: " ++ show v
+      Just i -> return (DeBruijnV (fromIntegral i), [])
+  convertFun f =
+    case readMaybe f of
+      Nothing -> MonadFail.fail $ "Unknown constant: " ++ show f
+      Just f -> return f
+  bindV v k = k () $ \m -> partialToSoup $ \ctx -> runPartialToSoup m (v : ctx)
+  convert_ t = partialToSoup $ \ctx -> do
+    u <- fresh
+    ks <- ini' ctx u t
+    return (u, ks)
+
 ini :: MonadSoup m => DCId -> DCoreP -> m [K]
 ini = ini' []
 
-ini' :: MonadSoup m => [String] -> DCId -> DCoreP -> m [K]
+ini' :: [String] -> MonadSoup m => DCId -> DCoreP -> m [K]
 ini' _ _ Nothing = return []
-ini' ctx t (Just t_) = do
-  (h, ks) <- ini'' ctx t_
-  return (KEqDC t (RHSHead h) : ks)
-
-ini'' :: MonadSoup m => [String] -> DCore_ Partial -> m (DCore_ Soup, [K])
-ini'' ctx t_ = case t_ of
-  Star -> return (Star, [])
-
-  Fun c_
-    | Just c <- readMaybe c_ -> return (Fun c, [])
-    | otherwise -> MonadFail.fail $ "Unknown constant: " ++ c_
-
-  Var v
-    | Just i <- elemIndex v ctx -> return
-        ( Var (DeBruijnV (fromIntegral i))
-        , [] )
-    | otherwise -> MonadFail.fail $ "Unbound: " ++ v
-
-  Pi rel v t1_ t2_ -> do
-    (t1, t2) <- freshes
-    k1 <- ini' ctx t1 t1_
-    k2 <- ini' (v : ctx) t2 t2_
-    return
-      ( Pi rel () t1 t2
-      , k1 ++ k2 )
-
-  Abs rel v t1_ t2_ -> do
-    (t1, t2) <- freshes
-    k1 <- ini' ctx t1 t1_
-    k2 <- ini' (v : ctx) t2 t2_
-    return
-      ( Abs rel () t1 t2
-      , k1 ++ k2 )
-
-  App t1_ t2_ rel -> do
-    (t1, t2) <- freshes
-    k1 <- ini' ctx t1 t1_
-    k2 <- ini' ctx t2 t2_
-    return
-      ( App t1 t2 rel
-      , k1 ++ k2 )
+ini' ctx u (Just t) = do
+  (t, ks) <- runPartialToSoup (convertDCore t) ctx
+  return (KEqDC u (RHSHead t) : ks)
 
 type WithParams = (?params :: Params)
 
