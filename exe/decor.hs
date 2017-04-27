@@ -190,7 +190,6 @@ search opts = do
       for_ (_out opts) $ \file -> do
         writeFile file $ showState s
         putStrLn $ "Derivation written to " ++ file
-      eval opts s
     Left (e, s) ->
       for_ (_eout opts) $ \file -> do
         writeFile file . unlines $
@@ -217,20 +216,6 @@ showState s = unlines
   [ showSolution s
   , showCurrentDerivation s
   ]
-
-eval :: t -> S1 -> IO ()
-eval opts s =
-  case treeSolution s of
-    Just (a, b) -> do
-      print a
-      print b
-      print (typeOf a)
-      for_ (step a) $ \t -> do
-        print (typeOf t)
-        print t
-      print (preservation a)
-    Nothing -> return ()
-
 
 runApp :: WithParams => Options -> IO ()
 runApp opts = do
