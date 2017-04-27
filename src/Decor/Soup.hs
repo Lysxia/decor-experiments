@@ -254,7 +254,7 @@ constants =
 
   -- forall (r : *). Nat -> r -> (r -> r) -> r
   , (foldNatTy0, (\(Right r) -> r) (P.parseDC
-      "forall r : * . forall z : r . forall s : (forall m : r . r) . forall n : Nat . r"))
+      "forall r : * -> forall z : r -> forall s : (forall m : r -> r) -> forall n : Nat -> r"))
   ]
 
 data Ctx' = Ctx' [DeBruijnC]
