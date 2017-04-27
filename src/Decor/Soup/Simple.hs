@@ -32,7 +32,7 @@ import Data.Typeable
 import GHC.Generics (Generic)
 import Prelude hiding (fail)
 
-import Decor.Types
+import Decor.Types hiding (Tree)
 import Decor.Soup
 
 data ChoiceF s a

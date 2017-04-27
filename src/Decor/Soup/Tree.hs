@@ -12,18 +12,6 @@ import Decor.Soup
 import Decor.Soup.Simple
 import Decor.Types
 
-data Tree
-
-type instance RelT Tree = Rel
-type instance FunT Tree = Constant
-type instance VarT Tree = DeBruijnV
-type instance BindVarT Tree = ()
-type instance CVarT Tree = DeBruijnC
-type instance BindCVarT Tree = ()
-type instance DCore Tree = DCore_ Tree
-type instance Coercion Tree = CoercionId
-
-
 treeSolution :: S1 -> Maybe (DCore Tree, DCore Tree)
 treeSolution s = liftA2 (,) (treeDCore s t0) (treeDCore s ty0)
 
@@ -125,13 +113,13 @@ typeOf' ctx (App b a rel) = case typeOf' ctx b of
   Just (Pi rel' () tyB tyC) -> Just $ sub a tyC
   Nothing -> Nothing
 
-unPartial :: P.DCore -> Maybe (DCore Tree)
+unPartial :: DCoreP -> Maybe (DCore Tree)
 unPartial = unPartial_ []
 
-unPartial_ :: [String] -> P.DCore -> Maybe (DCore Tree)
+unPartial_ :: [String] -> DCoreP -> Maybe (DCore Tree)
 unPartial_ ctx (Just t) = unPartial' [] t
 unPartial_ _ Nothing = Nothing
 
-unPartial' :: [String] -> DCore_ P.Partial -> Maybe (DCore Tree)
+unPartial' :: [String] -> DCore_ Partial -> Maybe (DCore Tree)
 unPartial' ctx (Var v) = Var <$> DeBruijnV <$> fromIntegral <$> findIndex (== v) ctx
 unPartial' ctx (Fun f) = Fun <$> readMaybe f

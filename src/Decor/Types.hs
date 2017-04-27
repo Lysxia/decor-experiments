@@ -2,6 +2,8 @@
 
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE EmptyDataDecls #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -97,4 +99,72 @@ newtype L = L String
 
 instance Show L where
   show (L s) = s
+
+newtype DeBruijnV = DeBruijnV Integer
+  deriving (Eq, Ord, Show, Enum)
+
+newtype DeBruijnC = DeBruijnC Integer
+  deriving (Eq, Ord, Show, Enum)
+
+type Shift = Integer
+
+shift :: DeBruijnV -> Shift -> DeBruijnV
+shift (DeBruijnV i) s = DeBruijnV (i + s)
+
+asShift :: DeBruijnV -> Shift
+asShift (DeBruijnV i) = i
+
+data Constant
+  = Nat
+  | Zero
+  | Succ
+  | FoldNat
+  deriving (Eq, Ord, Read, Show, Enum, Bounded)
+
+
+data Tree
+
+type instance RelT Tree = Rel
+type instance FunT Tree = Constant
+type instance VarT Tree = DeBruijnV
+type instance BindVarT Tree = ()
+type instance CVarT Tree = DeBruijnC
+type instance BindCVarT Tree = ()
+type instance DCore Tree = DCore_ Tree
+type instance Coercion Tree = ()
+
+
+data Soup
+
+type instance RelT Soup = Rel
+type instance FunT Soup = Constant
+type instance VarT Soup = DeBruijnV
+type instance BindVarT Soup = ()
+type instance CVarT Soup = DeBruijnC
+type instance BindCVarT Soup = ()
+type instance DCore Soup = DCId
+type instance Coercion Soup = CoercionId
+
+newtype DCId = DCId Integer
+  deriving (Eq, Ord)
+
+instance Show DCId where
+  show (DCId n) = "u" ++ show n
+
+newtype CoercionId = CoercionId Integer
+  deriving (Eq, Ord, Show)
+
+
+data Partial
+
+type instance VarT  Partial = String
+type instance BindVarT Partial = String
+type instance RelT Partial = Rel
+type instance DCore Partial = DCoreP
+type instance FunT  Partial = String
+type instance CVarT Partial = ()
+type instance BindCVarT Partial = ()
+type instance Coercion Partial = ()
+
+type DCoreP = Maybe (DCore_ Partial)
 

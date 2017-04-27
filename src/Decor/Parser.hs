@@ -11,23 +11,8 @@ import Prelude hiding (showString, showParen)
 import Text.Megaparsec
 import qualified Text.Megaparsec.Lexer as L
 import Text.PrettyPrint hiding (space)
-import qualified Text.PrettyPrint as Pretty
 
-import Decor.Types hiding (DCore)
-import qualified Decor.Types as DC
-
-data Partial
-
-type instance VarT  Partial = String
-type instance BindVarT Partial = String
-type instance RelT Partial = Rel
-type instance DC.DCore Partial = DCore
-type instance FunT  Partial = String
-type instance CVarT Partial = ()
-type instance BindCVarT Partial = ()
-type instance Coercion Partial = ()
-
-type DCore = Maybe (DCore_ Partial)
+import Decor.Types
 
 type Parser = Parsec Dec String
 
@@ -37,12 +22,12 @@ symbol = L.symbol space
 lexeme :: Parser a -> Parser a
 lexeme = L.lexeme space
 
-parseDCore :: Parser DCore
+parseDCore :: Parser DCoreP
 parseDCore = do
   ts <- some parseSimpleDCore
   return (foldl1 (\t t' -> Just (App t t' Rel)) ts)
 
-parseSimpleDCore :: Parser DCore
+parseSimpleDCore :: Parser DCoreP
 parseSimpleDCore =
   symbol "_" *> return Nothing <|>
   symbol "(" *> parseDCore <* symbol ")" <|>
@@ -74,7 +59,7 @@ funOrVar s = Var s
 parseVar :: Parser String
 parseVar = lexeme (try (some alphaNumChar))
 
-parseDC :: String -> Either (ParseError Char Dec) DCore
+parseDC :: String -> Either (ParseError Char Dec) DCoreP
 parseDC = parse parseDCore ""
 
 type Printer = Int -> Doc
@@ -82,7 +67,7 @@ type Printer = Int -> Doc
 showString :: String -> Printer
 showString s = \_ -> text s
 
-showDCore :: DCore -> Printer
+showDCore :: DCoreP -> Printer
 showDCore Nothing = showString "_"
 showDCore (Just t) = showDCore_ t
 

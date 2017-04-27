@@ -45,45 +45,6 @@ import GHC.TypeLits
 import qualified Decor.Parser as P
 import Decor.Types
 
-data Soup
-
-type instance RelT Soup = Rel
-type instance FunT Soup = Constant
-type instance VarT Soup = DeBruijnV
-type instance BindVarT Soup = ()
-type instance CVarT Soup = DeBruijnC
-type instance BindCVarT Soup = ()
-type instance DCore Soup = DCId
-type instance Coercion Soup = CoercionId
-
-newtype DeBruijnV = DeBruijnV Integer
-  deriving (Eq, Ord, Show, Enum)
-
-data Constant
-  = Nat
-  | Zero
-  | Succ
-  | FoldNat
-  deriving (Eq, Ord, Read, Show, Enum, Bounded)
-
-shift :: DeBruijnV -> Shift -> DeBruijnV
-shift (DeBruijnV i) s = DeBruijnV (i + s)
-
-asShift :: DeBruijnV -> Shift
-asShift (DeBruijnV i) = i
-
-newtype DeBruijnC = DeBruijnC Integer
-  deriving (Eq, Ord, Show, Enum)
-
-newtype DCId = DCId Integer
-  deriving (Eq, Ord)
-
-instance Show DCId where
-  show (DCId n) = "u" ++ show n
-
-newtype CoercionId = CoercionId Integer
-  deriving (Eq, Ord, Show)
-
 -- | Constraints.
 data K where
   KEqDC :: DCId -> RHS -> K
@@ -116,22 +77,22 @@ data Params = Params
   , _absurd :: Bool
   , _pruning :: Int
   , _jumping :: Int
-  , _iniTerm :: P.DCore
-  , _iniType :: P.DCore
+  , _iniTerm :: DCoreP
+  , _iniType :: DCoreP
   , _noConstants :: Bool
   , _guessSub :: Bool
   } deriving Generic
 
-ini :: MonadSoup m => DCId -> P.DCore -> m [K]
+ini :: MonadSoup m => DCId -> DCoreP -> m [K]
 ini = ini' []
 
-ini' :: MonadSoup m => [String] -> DCId -> P.DCore -> m [K]
+ini' :: MonadSoup m => [String] -> DCId -> DCoreP -> m [K]
 ini' _ _ Nothing = return []
 ini' ctx t (Just t_) = do
   (h, ks) <- ini'' ctx t_
   return (KEqDC t (RHSHead h) : ks)
 
-ini'' :: MonadSoup m => [String] -> DCore_ P.Partial -> m (DCore_ Soup, [K])
+ini'' :: MonadSoup m => [String] -> DCore_ Partial -> m (DCore_ Soup, [K])
 ini'' ctx t_ = case t_ of
   Star -> return (Star, [])
 
@@ -225,8 +186,6 @@ composeSub :: Sub -> Sub -> Sub
 composeSub (Sub vs cs) (Sub vs' cs') =
   Sub (composeBimap vs vs') (composeBimap cs cs')
 
-type Shift = Integer
-
 data RHS
   = RHSId DCId Shift
   | RHSHead (DCore_ Soup)
@@ -289,7 +248,7 @@ natToNatTyDC
     :: DCore_ Soup
 natToNatTyDC = Pi Rel () nat0 nat0
 
-constants :: [(DCId, P.DCore)]
+constants :: [(DCId, DCoreP)]
 constants =
   [ (nat0, Just (Fun "Nat"))
 
