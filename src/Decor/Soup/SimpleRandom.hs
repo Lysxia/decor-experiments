@@ -107,11 +107,11 @@ data GenParams = GenParams
   { genSecs :: Int
   }
 
-type HistoryItem = Log S1
+type History = [Maybe (Log S1)]
 
 generate
   :: (WithParams, WithRandomSearchParams)
-  => GenParams -> IO (Either ([Maybe HistoryItem], String, S1) S1)
+  => GenParams -> IO (History, Either (String, S1) S1)
 generate GenParams{..} = do
   m <- newEmptyMVar
   log <- newMVar []
@@ -128,7 +128,7 @@ generate GenParams{..} = do
   s <- takeMVar result
   h <- readMVar log
   killThread tid2
-  return (first (\(r, s) -> (h, r, s)) s)
+  return (h, s)
 
 data Log s = Log
   { remainingFuel :: Int

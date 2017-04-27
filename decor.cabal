@@ -57,6 +57,7 @@ executable decor
   main-is: decor.hs
   hs-source-dirs: exe
   build-depends:
+    ansi-terminal,
     base,
     brick,
     containers,

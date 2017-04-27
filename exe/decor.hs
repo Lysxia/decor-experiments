@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -17,6 +18,8 @@ import Data.List.NonEmpty (NonEmpty(..))
 import Data.Maybe (fromMaybe)
 import Data.Traversable
 import Options.Generic
+import System.Console.ANSI
+import System.Exit
 import System.IO
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Map as Map
@@ -135,8 +138,18 @@ streamWith n (Stream continue) h = do
       streamWith (fmap (subtract 1) n) continue h
 
 retry :: (WithParams, WithRandomSearchParams) => Options -> IO ()
-retry opts = do
-  s <- generate GenParams
+retry opts = retry' opts (RetryCount 0 0)
+
+data RetryCount = RetryCount
+  { discard :: Int
+  , ok :: Int
+  }
+
+retry' :: (WithParams, WithRandomSearchParams) => Options -> RetryCount -> IO ()
+retry' opts rc = do
+  cursorUpLine 2 >> clearLine >> putStrLn ("NO: " ++ show (discard rc))
+  clearLine >> putStrLn ("OK: " ++ show (ok rc))
+  (h, s) <- generate GenParams
     { genSecs = fromMaybe 10 (_secs opts)
     }
   case s of
@@ -145,27 +158,29 @@ retry opts = do
       -- putStrLn (showSolution s)
       case treeSolution s of
         Nothing -> do
-          putStr "should not happen"
-          hFlush stdout
-          retry opts
+          hPutStrLn stderr "should not happen"
+          writeFile "/tmp/decor-error" $ unlines
+            [ showState s
+            , showHistory h
+            ]
+          exitFailure
         Just (a, b) -> do
           if typeOf a /= Just b then do
             putStr "TERM: " >> print a
             putStr "TYPE : " >> print (Just b)
             putStr "TYPE': " >> print (typeOf a)
           else if preservation a then
-            putStr "," >> hFlush stdout >> retry opts
+            retry' opts rc{ok = ok rc + 1}
           else do
             putStr "TERM: " >> print a
             putStr "TYPE: " >> print b
             putStr "STEPS TO: " >> print (step a)
             putStr "OF TYPE: " >> print (typeOf <$> step a)
-    Left (h, e, s) ->
-      putStr "." >> hFlush stdout >> retry opts
+    Left (e, s) -> retry' opts rc{discard = discard rc + 1}
 
 search :: (WithParams, WithRandomSearchParams) => Options -> IO ()
 search opts = do
-  s <- generate GenParams
+  (h, s) <- generate GenParams
     { genSecs = fromMaybe 10 (_secs opts)
     }
   case s of
@@ -173,26 +188,35 @@ search opts = do
       putStrLn "SUCCESS\n"
       putStrLn (showSolution s)
       for_ (_out opts) $ \file -> do
-        writeFile file $ showCurrentDerivation s
+        writeFile file $ showState s
         putStrLn $ "Derivation written to " ++ file
       eval opts s
-    Left (h, e, s) ->
+    Left (e, s) ->
       for_ (_eout opts) $ \file -> do
         writeFile file . unlines $
           [ "FAIL"
           , showSolution s
           , e
           , showCurrentDerivation s
-          ] ++ do
-            Just (Log fuel s) <- h
-            id
-              [ replicate 30 '='
-              , show fuel
-              , showSolution s
-              , showCurrentDerivation s
-              ]
+          , showHistory h
+          ]
         putStrLn $ "Search state written to " ++ file
 
+showHistory :: WithParams => History -> String
+showHistory h = unlines $ do
+  Just (Log fuel s) <- h
+  id
+    [ replicate 30 '='
+    , show fuel
+    , showSolution s
+    , showCurrentDerivation s
+    ]
+
+showState :: WithParams => S1 -> String
+showState s = unlines
+  [ showSolution s
+  , showCurrentDerivation s
+  ]
 
 eval :: t -> S1 -> IO ()
 eval opts s =
