@@ -138,7 +138,9 @@ streamWith n (Stream continue) h = do
       streamWith (fmap (subtract 1) n) continue h
 
 retry :: (WithParams, WithRandomSearchParams) => Options -> IO ()
-retry opts = retry' opts (RetryCount 0 0)
+retry opts = do
+  putStrLn "" >> putStrLn ""
+  retry' opts (RetryCount 0 0)
 
 data RetryCount = RetryCount
   { discard :: Int
@@ -147,7 +149,8 @@ data RetryCount = RetryCount
 
 retry' :: (WithParams, WithRandomSearchParams) => Options -> RetryCount -> IO ()
 retry' opts rc = do
-  cursorUpLine 2 >> clearLine >> putStrLn ("NO: " ++ show (discard rc))
+  cursorUpLine 2
+  clearLine >> putStrLn ("NO: " ++ show (discard rc))
   clearLine >> putStrLn ("OK: " ++ show (ok rc))
   (h, s) <- generate GenParams
     { genSecs = fromMaybe 10 (_secs opts)
@@ -169,7 +172,7 @@ retry' opts rc = do
             putStr "TERM: " >> print a
             putStr "TYPE : " >> print (Just b)
             putStr "TYPE': " >> print (typeOf a)
-          else if preservation a then
+          else if progress a then
             retry' opts rc{ok = ok rc + 1}
           else do
             putStr "TERM: " >> print a

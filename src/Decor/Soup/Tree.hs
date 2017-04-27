@@ -45,6 +45,11 @@ preservation t = case step t of
     Just t' -> typeOf t == typeOf t'
     Nothing -> True
 
+progress :: DCore Tree -> Bool
+progress t = case (t, step t) of
+  (App _ _ _, Nothing) -> False
+  _ -> True
+
 sub :: DCore Tree -> DCore Tree -> DCore Tree
 sub = sub' (DeBruijnV 0)
 
