@@ -7,10 +7,9 @@
 {-# LANGUAGE TypeFamilies #-}
 
 import Brick
-import Graphics.Vty (Key(..), Event(..), Modifier(..), defAttr)
+import Graphics.Vty (Key(..), Event(..), defAttr)
 
 import Control.Concurrent
-import Control.Exception
 import Control.Monad
 import Control.Monad.Free
 import Data.Foldable
@@ -135,122 +134,64 @@ streamWith n (Stream continue) h = do
       hPutStrLn h (showSolution s)
       streamWith (fmap (subtract 1) n) continue h
 
+retry :: (WithParams, WithRandomSearchParams) => Options -> IO ()
 retry opts = do
-  m <- newEmptyMVar
-  log <- newMVar []
-  result <- newEmptyMVar
-  tid <- forkIO $ mask $ \restore ->
-    restore (runLogS m randomSearch) >>= putMVar result
-  let loop 0 = killThread tid
-      loop n = do
-        threadDelay (10 ^ 6)
-        x <- tryTakeMVar m
-        modifyMVar_ log (return . (x :))
-        loop (n - 1)
-  tid2 <- forkIO $ loop (fromMaybe 10 (_secs opts))
-  let history = do
-        xs <- readMVar log
-        return $ do
-          Just (fuel, s) <- xs
-          [   replicate 30 '='
-            , show fuel
-            , showSolution s
-            , showCurrentDerivation s
-            ]
-  let h BlockedIndefinitelyOnMVar =
-        for_ (_eout opts) $ \file -> do
-          writeFile file . unlines =<< history
-          putStrLn $ "Search sample written to " ++ file
-  handle h $ do
-    s <- takeMVar result
-    xs <- readMVar log
-    killThread tid2
-    case s of
-      Right s -> do
-        -- putStrLn "SUCCESS\n"
-        -- putStrLn (showSolution s)
-        for_ (_out opts) $ \file -> do
-          writeFile file $ showCurrentDerivation s
-          putStrLn $ "Derivation written to " ++ file
-        case treeSolution s of
-          Nothing -> do
-            putStr "should not happen"
-            hFlush stdout
-            retry opts
-          Just (a, b) -> do
-            if typeOf a /= Just b then do
-              putStr "TERM: " >> print a
-              putStr "TYPE : " >> print (Just b)
-              putStr "TYPE': " >> print (typeOf a)
-            else if preservation a then
-              putStr "," >> hFlush stdout >> retry opts
-            else do
-              putStr "TERM: " >> print a
-              putStr "TYPE: " >> print b
-              putStr "STEPS TO: " >> print (step a)
-              putStr "OF TYPE: " >> print (typeOf <$> step a)
-      Left (e, s) -> do
-        for_ (_eout opts) $ \file -> do
-          history <- history
-          writeFile file . unlines $
-            [ "FAIL"
-            , showSolution s
-            , e
-            , showCurrentDerivation s
-            ] ++ history
-          putStrLn $ "Search state written to " ++ file
-        putStr "." >> retry opts
-
+  s <- generate GenParams
+    { genSecs = fromMaybe 10 (_secs opts)
+    }
+  case s of
+    Right s -> do
+      -- putStrLn "SUCCESS\n"
+      -- putStrLn (showSolution s)
+      case treeSolution s of
+        Nothing -> do
+          putStr "should not happen"
+          hFlush stdout
+          retry opts
+        Just (a, b) -> do
+          if typeOf a /= Just b then do
+            putStr "TERM: " >> print a
+            putStr "TYPE : " >> print (Just b)
+            putStr "TYPE': " >> print (typeOf a)
+          else if preservation a then
+            putStr "," >> hFlush stdout >> retry opts
+          else do
+            putStr "TERM: " >> print a
+            putStr "TYPE: " >> print b
+            putStr "STEPS TO: " >> print (step a)
+            putStr "OF TYPE: " >> print (typeOf <$> step a)
+    Left (h, e, s) ->
+      putStr "." >> hFlush stdout >> retry opts
 
 search :: (WithParams, WithRandomSearchParams) => Options -> IO ()
 search opts = do
-  m <- newEmptyMVar
-  log <- newMVar []
-  result <- newEmptyMVar
-  tid <- forkIO $ mask $ \restore ->
-    restore (runLogS m randomSearch) >>= putMVar result
-  let loop 0 = killThread tid
-      loop n = do
-        threadDelay (10 ^ 6)
-        x <- tryTakeMVar m
-        modifyMVar_ log (return . (x :))
-        loop (n - 1)
-  tid2 <- forkIO $ loop (fromMaybe 10 (_secs opts))
-  let history = do
-        xs <- readMVar log
-        return $ do
-          Just (fuel, s) <- xs
-          [   replicate 30 '='
-            , show fuel
-            , showSolution s
-            , showCurrentDerivation s
-            ]
-  let h BlockedIndefinitelyOnMVar =
-        for_ (_eout opts) $ \file -> do
-          writeFile file . unlines =<< history
-          putStrLn $ "Search sample written to " ++ file
-  handle h $ do
-    s <- takeMVar result
-    xs <- readMVar log
-    killThread tid2
-    case s of
-      Right s -> do
-        putStrLn "SUCCESS\n"
-        putStrLn (showSolution s)
-        for_ (_out opts) $ \file -> do
-          writeFile file $ showCurrentDerivation s
-          putStrLn $ "Derivation written to " ++ file
-        eval opts s
-      Left (e, s) ->
-        for_ (_eout opts) $ \file -> do
-          history <- history
-          writeFile file . unlines $
-            [ "FAIL"
-            , showSolution s
-            , e
-            , showCurrentDerivation s
-            ] ++ history
-          putStrLn $ "Search state written to " ++ file
+  s <- generate GenParams
+    { genSecs = fromMaybe 10 (_secs opts)
+    }
+  case s of
+    Right s -> do
+      putStrLn "SUCCESS\n"
+      putStrLn (showSolution s)
+      for_ (_out opts) $ \file -> do
+        writeFile file $ showCurrentDerivation s
+        putStrLn $ "Derivation written to " ++ file
+      eval opts s
+    Left (h, e, s) ->
+      for_ (_eout opts) $ \file -> do
+        writeFile file . unlines $
+          [ "FAIL"
+          , showSolution s
+          , e
+          , showCurrentDerivation s
+          ] ++ do
+            Just (Log fuel s) <- h
+            id
+              [ replicate 30 '='
+              , show fuel
+              , showSolution s
+              , showCurrentDerivation s
+              ]
+        putStrLn $ "Search state written to " ++ file
 
 
 eval :: t -> S1 -> IO ()

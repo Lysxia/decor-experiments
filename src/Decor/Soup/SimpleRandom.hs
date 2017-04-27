@@ -4,6 +4,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Decor.Soup.SimpleRandom where
@@ -14,6 +15,7 @@ import Control.Monad.Catch
 import Control.Monad.Free
 import Control.Monad.Random
 import Control.Monad.Reader
+import Data.Bifunctor
 
 import Decor.Soup
 import Decor.Soup.Simple
@@ -44,7 +46,7 @@ pickTypeOnce :: WithRandomSearchParams => Bool
 pickTypeOnce = _pickTypeOnce ?randomSearchParams
 
 randomSearch
-  :: (WithParams, WithRandomSearchParams, MonadCatch m, MonadRandom m, MonadLogS Log m)
+  :: (WithParams, WithRandomSearchParams, MonadCatch m, MonadRandom m, MonadLogS (Log S1) m)
   => m (Either (String, S1) S1)
 randomSearch = randomSearch' getFuel maxDepth initS1 ok fail treeH1
   where
@@ -53,7 +55,7 @@ randomSearch = randomSearch' getFuel maxDepth initS1 ok fail treeH1
 
 randomSearch'
   :: forall m s r
-  .  (MonadCatch m, MonadRandom m, MonadLogS (Int, s) m, WithRandomSearchParams)
+  .  (MonadCatch m, MonadRandom m, MonadLogS (Log s) m, WithRandomSearchParams)
   => Int
   -> Int
   -> s
@@ -66,7 +68,7 @@ randomSearch' fuel depth s ok fail t = handle h $ case t of
   _ | depth == 0 -> fail fuel "Max depth reached" s
   Free f -> case f of
     Tag _ (Free (Tag s' _)) -> fail (fuel-1) "Potential occurs-fail" s'
-    Tag s' t' -> logS (fuel, s') >> randomSearch' fuel (depth-1) s' ok fail t'
+    Tag s' t' -> logS (Log fuel s') >> randomSearch' fuel (depth-1) s' ok fail t'
     Fail e -> fail (fuel-1) e s
     Pick _ [(_, t')] -> randomSearch' fuel (depth-1) s ok fail t'
     Pick "Type" ys | pickTypeOnce -> do
@@ -101,21 +103,51 @@ randomSearch' fuel depth s ok fail t = handle h $ case t of
       | otherwise = go (w - w') (wy : wys0) wys1 k
     go _ _ [] _ = error "assert false"
 
-type Log = (Int, S1)
+data GenParams = GenParams
+  { genSecs :: Int
+  }
+
+type HistoryItem = Log S1
+
+generate
+  :: (WithParams, WithRandomSearchParams)
+  => GenParams -> IO (Either ([Maybe HistoryItem], String, S1) S1)
+generate GenParams{..} = do
+  m <- newEmptyMVar
+  log <- newMVar []
+  result <- newEmptyMVar
+  tid <- forkIO $ mask $ \restore ->
+    restore (runLogS m randomSearch) >>= putMVar result
+  let loop 0 = killThread tid
+      loop n = do
+        threadDelay (10 ^ 6)
+        x <- tryTakeMVar m
+        modifyMVar_ log (return . (x :))
+        loop (n - 1)
+  tid2 <- forkIO $ loop genSecs
+  s <- takeMVar result
+  h <- readMVar log
+  killThread tid2
+  return (first (\(r, s) -> (h, r, s)) s)
+
+data Log s = Log
+  { remainingFuel :: Int
+  , logState :: s
+  }
 
 class MonadLogS s m where
   logS :: s -> m ()
 
-instance MonadLogS Log LogS where
+instance MonadLogS (Log s) (LogS s) where
   logS s = LogS $ ReaderT $ \m -> tryTakeMVar m >> putMVar m s >> return ()
 
 instance MonadLogS s IO where
   logS _ = return ()
 
-newtype LogS a = LogS (ReaderT (MVar Log) IO a)
+newtype LogS s a = LogS (ReaderT (MVar (Log s)) IO a)
   deriving (Functor, Applicative, Monad, MonadThrow, MonadCatch, MonadRandom)
 
-runLogS :: MVar Log -> LogS a -> IO a
+runLogS :: MVar (Log s) -> LogS s a -> IO a
 runLogS m (LogS r) = runReaderT r m
 
 weight :: WithRandomSearchParams => Tree_ s -> Int
