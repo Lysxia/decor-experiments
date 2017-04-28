@@ -30,6 +30,7 @@ import Decor.Soup.Simple
 import Decor.Soup.SimpleRandom
 import Decor.Soup.SimpleStreaming
 import Decor.Soup.Tree
+import Decor.Types.Convert
 
 data RunMode = Gen | Streaming | RunApp | Retry deriving (Generic, Read, Show)
 
@@ -168,18 +169,23 @@ retry' opts rc = do
             ]
           exitFailure
         Just (a, b) -> do
-          if typeOf a /= Just b then do
-            putStr "TERM: " >> print a
-            putStr "TYPE : " >> print (Just b)
-            putStr "TYPE': " >> print (typeOf a)
-          else if progress a then
+          let wellTyped = typeOf a == Just b
+              progress_ = progress a
+              preservation_ = preservation a
+          if wellTyped && progress_ && preservation_ then
             retry' opts rc{ok = ok rc + 1}
           else do
-            putStr "TERM: " >> print a
-            putStr "TYPE: " >> print b
-            putStr "STEPS TO: " >> print (step a)
-            putStr "OF TYPE: " >> print (typeOf <$> step a)
+            putStrLn "TERM: " >> print (showDCore a)
+            putStrLn "TYPE: " >> print (showDCore b)
+            putStrLn "STEPS TO: " >> print (fmap showDCore (step a))
+            putStrLn "OF TYPE: " >> print (fmap showDCore (typeOf =<< step a))
+            unless wellTyped $
+              putStrLn "INFERRED: " >> print (fmap showDCore (typeOf a))
+            unless preservation_ $ putStrLn "NO PRESERVATION"
+            unless progress_ $ putStrLn "NO PROGRESS"
     Left (e, s) -> retry' opts rc{discard = discard rc + 1}
+  where
+    showDCore = ($ 0) . P.showDCore . convertTreeToPartial
 
 search :: (WithParams, WithRandomSearchParams) => Options -> IO ()
 search opts = do

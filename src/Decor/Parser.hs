@@ -101,7 +101,7 @@ showDCore_ t = case t of
   App b a _ -> showPrec 10 $ \n ->
     sep
       [ resetPrec 10 (showDCore b) n
-      , resetPrec 11 (showDCore a) n
+      , nest 2 $ resetPrec 11 (showDCore a) n
       ]
 
 showParen :: Printer -> Printer
