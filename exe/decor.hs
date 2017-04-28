@@ -33,7 +33,13 @@ import Decor.Soup.SimpleStreaming
 import Decor.Soup.Tree
 import Decor.Types.Convert
 
-data RunMode = Gen | Streaming | RunApp | Retry deriving (Generic, Read, Show)
+data RunMode
+  = Gen
+  | Streaming
+  | RunApp
+  | Retry
+  | RetryS
+  deriving (Generic, Read, Show)
 
 data Options_ w = Options
   { _mode :: w ::: RunMode <?> "RunApp;Gen;Streaming"
@@ -82,6 +88,7 @@ main = do
     RunApp -> runApp opts
     Streaming -> stream opts
     Retry -> retry opts
+    RetryS -> retryS opts
 
 defaultRSP opts = RandomSearchParams
   { _maxFuel = fromMaybe 100 (__fuel opts)
@@ -139,6 +146,23 @@ streamWith n (Stream continue) h = do
       hPutStrLn h (showSolution s)
       streamWith (fmap (subtract 1) n) continue h
 
+retryS :: (WithParams, WithRandomSearchParams) => Options -> IO ()
+retryS opts = do
+  r <- newEmptyMVar
+  let g = GenParams
+        { genSecs = fromMaybe 10 (_secs opts)
+        , subGenSecs = Just 1
+        }
+      width = fromMaybe 100 (_width opts)
+  tid <- generateS g width r
+  let
+    loop n = do
+      cursorUpLine 1 >> print n
+      s <- takeMVar r
+      testSolution (oops s []) (killThread tid) (loop (n+1)) s
+  putStrLn ""
+  loop 0
+
 retry :: (WithParams, WithRandomSearchParams) => Options -> IO ()
 retry opts = do
   putStrLn "" >> putStrLn ""
@@ -156,35 +180,40 @@ retry' opts rc = do
   clearLine >> putStrLn ("OK: " ++ show (ok rc))
   (h, s) <- generate GenParams
     { genSecs = fromMaybe 10 (_secs opts)
+    , subGenSecs = Nothing
     }
   case s of
-    Right s -> do
-      -- putStrLn "SUCCESS\n"
-      -- putStrLn (showSolution s)
-      case treeSolution s of
-        Nothing -> do
-          hPutStrLn stderr "should not happen"
-          writeFile "/tmp/decor-error" $ unlines
-            [ showState s
-            , showHistory h
-            ]
-          exitFailure
-        Just (a, b) -> do
-          let wellTyped = typeOf a == Just b
-              progress_ = progress a
-              preservation_ = preservation a
-          if wellTyped && progress_ && preservation_ then
-            retry' opts rc{ok = ok rc + 1}
-          else do
-            putStrLn "TERM: " >> print (showDCore a)
-            putStrLn "TYPE: " >> print (showDCore b)
-            putStrLn "STEPS TO: " >> print (fmap showDCore (step a))
-            putStrLn "OF TYPE: " >> print (fmap showDCore (typeOf =<< step a))
-            unless wellTyped $
-              putStrLn "INFERRED: " >> print (fmap showDCore (typeOf a))
-            unless preservation_ $ putStrLn "NO PRESERVATION"
-            unless progress_ $ putStrLn "NO PROGRESS"
+    Right s -> testSolution (oops s h) (return ()) (retry' opts rc{ok = ok rc + 1}) s
     Left (e, s) -> retry' opts rc{discard = discard rc + 1}
+
+oops :: WithParams => S1 -> History -> IO a
+oops s h = do
+  hPutStrLn stderr "should not happen"
+  writeFile "/tmp/decor-error" $ unlines
+    [ showState s
+    , showHistory h
+    ]
+  exitFailure
+
+testSolution :: (WithParams) => IO () -> IO () -> IO () -> S1 -> IO ()
+testSolution oops yes no s = case treeSolution s of
+  Nothing -> oops
+  Just (a, b) -> do
+    let wellTyped = typeOf a == Just b
+        progress_ = progress a
+        preservation_ = preservation a
+    if wellTyped && progress_ && preservation_ then
+      no
+    else do
+      putStrLn "TERM: " >> print (showDCore a)
+      putStrLn "TYPE: " >> print (showDCore b)
+      putStrLn "STEPS TO: " >> print (fmap showDCore (step a))
+      putStrLn "OF TYPE: " >> print (fmap showDCore (typeOf =<< step a))
+      unless wellTyped $
+        putStrLn "INFERRED: " >> print (fmap showDCore (typeOf a))
+      unless preservation_ $ putStrLn "NO PRESERVATION"
+      unless progress_ $ putStrLn "NO PROGRESS"
+      yes
   where
     showDCore = ($ 0) . P.showDCore . convertTreeToPartial
 
@@ -192,6 +221,7 @@ search :: (WithParams, WithRandomSearchParams) => Options -> IO ()
 search opts = do
   (h, s) <- generate GenParams
     { genSecs = fromMaybe 10 (_secs opts)
+    , subGenSecs = Nothing
     }
   case s of
     Right s -> do
