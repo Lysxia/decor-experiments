@@ -113,7 +113,7 @@ parse s = case P.parseDC s of
 stream :: (WithParams, WithRandomSearchParams) => Options -> IO ()
 stream opts = do
   let width = fromMaybe 100 (_width opts)
-      stream = streamingSearch width
+      stream = streamingSearch (return . return) width
       streamWith' = streamWith (_iter opts) stream
       runStream = case _out opts of
         Nothing -> streamWith' stdout

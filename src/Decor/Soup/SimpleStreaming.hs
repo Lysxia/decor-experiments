@@ -19,51 +19,57 @@ newtype Stream m s = Stream { unStream :: m (Maybe (s, Stream m s)) }
 
 streamingSearch
   :: (WithParams, WithRandomSearchParams, PrimMonad m, MonadRandom m, MonadRef r m)
-  => Int -> Stream m S1
-streamingSearch n = Stream $ do
+  => (Tree_ S1 -> m (Maybe (Tree_ S1))) -> Int -> Stream m S1
+streamingSearch evaluate n = Stream $ do
   v <- MV.unsafeNew n
   MV.write v 0 (treeH1, maxDepth, Nothing)
-  streamingSearch' v 1
+  streamingSearch' evaluate v 1
 
 streamingSearch'
   :: (PrimMonad m, MonadRandom m, MonadRef r m, WithRandomSearchParams)
-  => MVector (PrimState m) (Tree_ s, Int, Maybe (r Bool))
+  => (Tree_ s -> m (Maybe (Tree_ s)))
+  -> MVector (PrimState m) (Tree_ s, Int, Maybe (r Bool))
   -> Int
   -> m (Maybe (s, Stream m s))
-streamingSearch' _ 0 = return Nothing
-streamingSearch' v n = do
+streamingSearch' _ _ 0 = return Nothing
+streamingSearch' evaluate v n = do
   i <- getRandomR (0, n-1)
   (t, d, m) <- MV.unsafeRead v i
   let clear k = do
         when (i < n - 1) $ MV.unsafeWrite v i =<< MV.unsafeRead v (n - 1)
         MV.unsafeWrite v (n - 1) undefined
-        k (streamingSearch' v (n - 1))
+        k (streamingSearch' evaluate v (n - 1))
   late <- case m of
     Just r -> readRef r
     Nothing -> return False
+  t'@ ~(Just t) <-
+    if d == 0 || late then
+      return Nothing
+    else
+      evaluate t
   case t of
-    _ | d == 0 || late -> clear id
+    _ | Nothing <- t' -> clear id
     Pure s -> do
       for_ m $ \r -> writeRef r True
       clear (\continue -> return (Just (s, Stream continue)))
     Free f -> case f of
       Tag _ t -> do
         MV.unsafeWrite v i (t, d-1, m)
-        streamingSearch' v n
+        streamingSearch' evaluate v n
       Pick "Type" ts | pickTypeOnce -> do
         i <- getRandomR (0, length ts - 1)
         let (_, t) : _ = drop i ts
         MV.unsafeWrite v i (t, d-1, m)
-        streamingSearch' v n
+        streamingSearch' evaluate v n
       Pick _ xs@(_ : _) -> do
         tdm : ts <- shuffle maxTries [(weight t, (t, d-1, m)) | (_, t) <- xs]
         MV.unsafeWrite v i tdm
         n <- append v n ts
-        streamingSearch' v n
+        streamingSearch' evaluate v n
       Check t -> do
         r <- newRef False
         MV.unsafeWrite v i (t, d-1, m <|> Just r)
-        streamingSearch' v n
+        streamingSearch' evaluate v n
       Fail _ -> clear id
       Pick _ [] -> clear id
 
