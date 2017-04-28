@@ -38,6 +38,13 @@ step (App b a rel) =
   case (b, step b) of
     (_, Just b) -> Just (App b a rel)
     (Abs rel' () _ b, Nothing) | rel == rel' -> Just (sub a b)
+    (App (App (App (Fun FoldNat) r relr) z relz) s rels, Nothing)
+      | Fun Zero <- a -> Just z
+      | App (Fun Succ) a _ <- a ->
+          Just $ App (App (App (App (Fun FoldNat) r relr) (App s z Rel) relz) s rels) a rel
+      | Just a <- step a ->
+          Just $ App (App (App (App (Fun FoldNat) r relr) z relz) s rels) a rel
+      | otherwise -> Nothing
     _ -> Nothing
 
 preservation :: DCore Tree -> Bool
@@ -46,9 +53,18 @@ preservation t = case step t of
     Nothing -> True
 
 progress :: DCore Tree -> Bool
-progress t = case (t, step t) of
-  (App _ _ _, Nothing) -> False
-  _ -> True
+progress t = case step t of
+  Nothing -> isValue t
+  Just _ -> True
+
+isValue :: DCore Tree -> Bool
+isValue (Fun _) = True
+isValue (App (Fun Succ) _ _) = True
+isValue (App (Fun FoldNat) _ _) = True
+isValue (App (App (Fun FoldNat) _ _) _ _) = True
+isValue (App (App (App (Fun FoldNat) _ _) _ _) _ _) = True
+isValue (App _ _ _) = False
+isValue _ = True
 
 sub :: DCore Tree -> DCore Tree -> DCore Tree
 sub = sub' (DeBruijnV 0)
