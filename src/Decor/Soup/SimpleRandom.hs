@@ -4,7 +4,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Decor.Soup.SimpleRandom where
@@ -15,7 +14,6 @@ import Control.Monad.Catch
 import Control.Monad.Free
 import Control.Monad.Random
 import Control.Monad.Reader
-import Data.Bifunctor
 
 import Decor.Soup
 import Decor.Soup.Simple
@@ -103,32 +101,7 @@ randomSearch' fuel depth s ok fail t = handle h $ case t of
       | otherwise = go (w - w') (wy : wys0) wys1 k
     go _ _ [] _ = error "assert false"
 
-data GenParams = GenParams
-  { genSecs :: Int
-  }
-
 type History = [Maybe (Log S1)]
-
-generate
-  :: (WithParams, WithRandomSearchParams)
-  => GenParams -> IO (History, Either (String, S1) S1)
-generate GenParams{..} = do
-  m <- newEmptyMVar
-  log <- newMVar []
-  result <- newEmptyMVar
-  tid <- forkIO $ mask $ \restore ->
-    restore (runLogS m randomSearch) >>= putMVar result
-  let loop 0 = killThread tid
-      loop n = do
-        threadDelay (10 ^ 6)
-        x <- tryTakeMVar m
-        modifyMVar_ log (return . (x :))
-        loop (n - 1)
-  tid2 <- forkIO $ loop genSecs
-  s <- takeMVar result
-  h <- readMVar log
-  killThread tid2
-  return (h, s)
 
 data Log s = Log
   { remainingFuel :: Int

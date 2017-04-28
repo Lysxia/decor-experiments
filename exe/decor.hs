@@ -27,6 +27,7 @@ import qualified Data.Map as Map
 import qualified Decor.Parser as P
 import Decor.Soup
 import Decor.Soup.Simple
+import Decor.Soup.SimpleIO
 import Decor.Soup.SimpleRandom
 import Decor.Soup.SimpleStreaming
 import Decor.Soup.Tree

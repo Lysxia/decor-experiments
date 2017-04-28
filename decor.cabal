@@ -21,6 +21,7 @@ library
     Decor.Parser
     Decor.Soup
     Decor.Soup.Simple
+    Decor.Soup.SimpleIO
     Decor.Soup.SimpleRandom
     Decor.Soup.SimpleStreaming
     Decor.Soup.Tree
