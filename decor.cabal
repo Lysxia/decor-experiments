@@ -25,6 +25,7 @@ library
     Decor.Soup.SimpleRandom
     Decor.Soup.SimpleStreaming
     Decor.Tree
+    Decor.Tree.Lazy
     Decor.Types
     Decor.Types.Convert
     Decor.Types.DC
@@ -48,6 +49,8 @@ library
     transformers,
     vector,
     QuickCheck,
+    lazy-search,
+    testing-feat,
     QuickCheck-GenT
   default-language:    Haskell2010
   ghc-options: -Wall -Wno-name-shadowing

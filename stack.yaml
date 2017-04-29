@@ -1,9 +1,13 @@
-resolver: lts-8.8
+flags: {}
+extra-package-dbs: []
 packages:
 - '.'
 extra-deps:
-  - 'one-liner-0.8.1'
-  - 'QuickCheck-GenT-0.2.0'
-  - 'optparse-generic-1.1.5'
-flags: {}
-extra-package-dbs: []
+- QuickCheck-GenT-0.2.0
+- dictionary-sharing-0.1.0.0
+- lazy-search-0.1.1.0
+- one-liner-0.8.1
+- optparse-generic-1.1.5
+- size-based-0.1.0.0
+- testing-type-modifiers-0.1.0.1
+resolver: lts-8.8
