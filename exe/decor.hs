@@ -30,7 +30,7 @@ import Decor.Soup.Simple
 import Decor.Soup.SimpleIO
 import Decor.Soup.SimpleRandom
 import Decor.Soup.SimpleStreaming
-import Decor.Soup.Tree
+import Decor.Tree
 import Decor.Types.Convert
 
 data RunMode
@@ -200,9 +200,10 @@ testSolution oops yes no s = case treeSolution s of
   Nothing -> oops
   Just (a, b) -> do
     let wellTyped = typeOf a == Just b
+        strongProgress_ = strongProgress a
         progress_ = progress a
         preservation_ = preservation a
-    if wellTyped && progress_ && preservation_ then
+    if wellTyped && progress_ && strongProgress_ && preservation_ then
       no
     else do
       putStrLn "TERM: " >> print (showDCore a)
@@ -212,7 +213,10 @@ testSolution oops yes no s = case treeSolution s of
       unless wellTyped $
         putStrLn "INFERRED: " >> print (fmap showDCore (typeOf a))
       unless preservation_ $ putStrLn "NO PRESERVATION"
-      unless progress_ $ putStrLn "NO PROGRESS"
+      if not progress_ then
+        putStrLn "NO PROGRESS"
+      else
+        unless strongProgress_ $ putStrLn "NO STRONG PROGRESS"
       yes
   where
     showDCore = ($ 0) . P.showDCore . convertTreeToPartial

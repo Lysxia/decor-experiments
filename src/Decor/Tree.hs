@@ -1,6 +1,6 @@
 {-# LANGUAGE TypeFamilies #-}
 
-module Decor.Soup.Tree where
+module Decor.Tree where
 
 import Control.Applicative
 import Data.List (findIndex)
@@ -56,6 +56,11 @@ progress :: DCore Tree -> Bool
 progress t = case step t of
   Nothing -> isValue t
   Just _ -> True
+
+strongProgress :: DCore Tree -> Bool
+strongProgress t = case step t of
+  Just t -> strongProgress t
+  Nothing -> isValue t
 
 isValue :: DCore Tree -> Bool
 isValue (Fun _) = True

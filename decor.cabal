@@ -24,7 +24,7 @@ library
     Decor.Soup.SimpleIO
     Decor.Soup.SimpleRandom
     Decor.Soup.SimpleStreaming
-    Decor.Soup.Tree
+    Decor.Tree
     Decor.Types
     Decor.Types.Convert
     Decor.Types.DC
