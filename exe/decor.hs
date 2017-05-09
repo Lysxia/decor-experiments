@@ -63,6 +63,7 @@ data Options_ w = Options
   , __iniType :: w ::: Maybe String <?> "Initial partial type"
   , __noConstants :: w ::: Bool <?> "Disable generating constants"
   , __guessSub :: w ::: Bool <?> "Perform reverse substitutions"
+  , __coercions :: w ::: Bool <?> "Allow coercions"
   } deriving Generic
 
 type Options = Options_ Unwrapped

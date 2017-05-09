@@ -83,6 +83,7 @@ data Params = Params
   , _iniType :: DCoreP
   , _noConstants :: Bool
   , _guessSub :: Bool
+  , _coercions :: Bool
   } deriving Generic
 
 newtype PartialToSoup m a = PartialToSoup
@@ -146,6 +147,9 @@ noConstants = _noConstants ?params
 
 guessSub :: WithParams => Bool
 guessSub = _guessSub ?params
+
+coercions :: WithParams => Bool
+coercions = _coercions ?params
 
 kEqDC :: DCId -> RHS -> K
 kEqDC = KEqDC
@@ -280,7 +284,14 @@ heads ctx =
   , (L ";", pick' "Rel" [Rel, Irr] >>= \rel -> freshes <&> \(b, a) -> App b a rel)
   ] ++
   [ (L "f", Fun <$> pick' "Constant" [minBound .. maxBound])
-  | not noConstants ]
+  | not noConstants
+  ] ++
+  (guard coercions *>
+  [ (L "Π'", freshes <&> \(eqProp, tyB) -> CoPi () eqProp tyB)
+  , (L "λ'", freshes <&> \(eqProp, b) -> CoAbs () eqProp b)
+  , (L ";'", freshes <&> \(b, c) -> CoApp b c)
+  , (L ":>", freshes <&> \(a, c) -> Coerce a c)
+  ])
   where
     (<&>) :: Functor f => f a -> (a -> b) -> f b
     (<&>) = flip fmap
