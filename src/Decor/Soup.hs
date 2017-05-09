@@ -261,7 +261,7 @@ data Ctx' = Ctx' [DeBruijnV]
   deriving (Eq, Ord, Show)
 
 cctx :: Ctx -> Ctx'
-cctx ctx = Ctx' (toEnum <$> [0 .. length (varCtx ctx)])
+cctx ctx = Ctx' [toEnum i | (i, Left _) <- zip [0 ..] (varCtx ctx)]
 
 pickVar :: MonadSoup m => Ctx -> m DeBruijnV
 pickVar ctx = pick' "Var" [toEnum i | (i, Right _) <- zip [0 ..] (varCtx ctx)]
@@ -411,6 +411,34 @@ typeCheck' ctx tyT (CoApp a g) = do
     , kEqDC tyT (RHSSubC g tyB)
     , KType ctx a ty'
     , KTypeC ctx (cctx ctx) g phi
+    ]
+
+typeCheckC' :: MonadSoup m => Ctx -> EqProp DCId -> Coercion_ Soup -> m [K]
+typeCheckC' ctx (a :~: b) (CVar v) =
+  case lookupCVar v ctx of
+    Nothing -> MonadFail.fail "Unbound c-variable"
+    Just (a' :~: b') ->
+      return
+        [ kEqDC a (RHSId a' (asShift v + 1))
+        , kEqDC b (RHSId b' (asShift v + 1))
+        ]
+
+typeCheckC' ctx (a :~: b) (CRefl a') =
+  return
+    [ kEqDC a (RHSId a' 0)
+    , kEqDC b (RHSId a' 0)
+    ]
+
+typeCheckC' ctx (a :~: b) (CSym g) =
+  return
+    [ KTypeC ctx (cctx ctx) g (b :~: a)
+    ]
+
+typeCheckC' ctx (a :~: c) (CSeq g1 g2) = do
+  b <- fresh
+  return
+    [ KTypeC ctx (cctx ctx) g1 (a :~: b)
+    , KTypeC ctx (cctx ctx) g2 (b :~: c)
     ]
 
 initK :: MonadSoup m => m ([K], DCId, DCId)
