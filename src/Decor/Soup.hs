@@ -29,6 +29,8 @@ import Control.Monad.Writer
 
 import Control.Comonad.Cofree
 
+import Data.Either
+import Data.Either.Combinators
 import Data.List (elemIndex)
 import Data.Maybe
 import Data.Typeable
@@ -226,15 +228,14 @@ freshes
 freshes = createA' (For :: For Fresh) fresh
 
 data Ctx = Ctx
-  { varCtx :: [DCId]
-  , cVarCtx :: [EqProp DCId]
+  { varCtx :: [Either (EqProp DCId) DCId]
   } deriving (Eq, Ord, Show)
 
 t0 : ty0 : nat0 : etc1 = DCId <$> [-1, -2 ..] :: [DCId]
 foldNatTy0 : etc2 = etc1
 
 emptyCtx :: Ctx
-emptyCtx = Ctx [] []
+emptyCtx = Ctx []
 
 k0 :: [K]
 k0 =
@@ -256,29 +257,29 @@ constants =
       "forall r : * -> forall z : r -> forall s : (forall m : r -> r) -> forall n : Nat -> r"))
   ]
 
-data Ctx' = Ctx' [DeBruijnC]
+data Ctx' = Ctx' [DeBruijnV]
   deriving (Eq, Ord, Show)
 
 cctx :: Ctx -> Ctx'
-cctx ctx = Ctx' (toEnum <$> [0 .. length (cVarCtx ctx)])
+cctx ctx = Ctx' (toEnum <$> [0 .. length (varCtx ctx)])
 
 pickVar :: MonadSoup m => Ctx -> m DeBruijnV
-pickVar ctx = pick' "Var" (toEnum <$> [0 .. length (varCtx ctx) - 1])
+pickVar ctx = pick' "Var" [toEnum i | (i, Right _) <- zip [0 ..] (varCtx ctx)]
 
 lookupVar :: DeBruijnV -> Ctx -> Maybe DCId
-lookupVar (DeBruijnV n) ctx = listToMaybe $ drop (fromIntegral n) (varCtx ctx)
+lookupVar (DeBruijnV n) ctx = (rightToMaybe <=< listToMaybe) $ drop (fromIntegral n) (varCtx ctx)
 
 insertVar :: DCId -> Ctx -> Ctx
-insertVar ty ctx = ctx { varCtx = ty : varCtx ctx }
+insertVar ty ctx = ctx { varCtx = Right ty : varCtx ctx }
 
-pickCVar :: MonadSoup m => Ctx -> m DeBruijnC
-pickCVar ctx = pick' "CVar" (toEnum <$> [0 .. length (cVarCtx ctx) - 1])
+pickCVar :: MonadSoup m => Ctx -> m DeBruijnV
+pickCVar ctx = pick' "Var" [toEnum i | (i, Left _) <- zip [0 ..] (varCtx ctx)]
 
-lookupCVar :: DeBruijnC -> Ctx -> Maybe (EqProp DCId)
-lookupCVar (DeBruijnC n) ctx = listToMaybe $ drop (fromIntegral n) (cVarCtx ctx)
+lookupCVar :: DeBruijnV -> Ctx -> Maybe (EqProp DCId)
+lookupCVar (DeBruijnV n) ctx = (leftToMaybe <=< listToMaybe) $ drop (fromIntegral n) (varCtx ctx)
 
 insertCVar :: EqProp DCId -> Ctx -> Ctx
-insertCVar phi ctx = ctx { cVarCtx = phi : cVarCtx ctx }
+insertCVar phi ctx = ctx { varCtx = Left phi : varCtx ctx }
 
 typeCheck :: (WithParams, MonadSoup m) => Ctx -> DCId -> DCId -> m [K]
 typeCheck ctx t tyT = do

@@ -111,15 +111,6 @@ shift (DeBruijnV i) s = DeBruijnV (i + s)
 asShift :: DeBruijnV -> Shift
 asShift (DeBruijnV i) = i
 
-newtype DeBruijnC = DeBruijnC Integer
-  deriving (Eq, Ord, Show, Enum)
-
-shiftC :: DeBruijnC -> Shift -> DeBruijnC
-shiftC (DeBruijnC i) s = DeBruijnC (i + s)
-
-asShiftC :: DeBruijnC -> Shift
-asShiftC (DeBruijnC i) = i
-
 data Constant
   = Nat
   | Zero
@@ -134,7 +125,7 @@ type instance RelT Tree = Rel
 type instance FunT Tree = Constant
 type instance VarT Tree = DeBruijnV
 type instance BindVarT Tree = ()
-type instance CVarT Tree = DeBruijnC
+type instance CVarT Tree = DeBruijnV
 type instance BindCVarT Tree = ()
 type instance DCore Tree = DCore_ Tree
 type instance Coercion Tree = ()
@@ -146,7 +137,7 @@ type instance RelT Soup = Rel
 type instance FunT Soup = Constant
 type instance VarT Soup = DeBruijnV
 type instance BindVarT Soup = ()
-type instance CVarT Soup = DeBruijnC
+type instance CVarT Soup = DeBruijnV
 type instance BindCVarT Soup = ()
 type instance DCore Soup = DCId
 type instance Coercion Soup = CoercionId
