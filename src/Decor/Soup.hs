@@ -40,6 +40,7 @@ import qualified Data.Bimap as Bimap
 import Lens.Micro.Platform
 
 import Generics.OneLiner
+import Generics.OneLiner.Internal (FunConstraints, Result)
 import GHC.Generics (Generic)
 import GHC.TypeLits
 
@@ -215,6 +216,9 @@ instance Fresh CoercionId where
 instance Fresh a => Fresh (EqProp a) where
   fresh = (:~:) <$> fresh <*> fresh
 
+instance Fresh () where
+  fresh = pure ()
+
 freshes
   :: forall t m
   .  (Generic t, ADTRecord t, Constraints t Fresh, MonadFresh m)
@@ -267,6 +271,12 @@ lookupVar (DeBruijnV n) ctx = listToMaybe $ drop (fromIntegral n) (varCtx ctx)
 insertVar :: DCId -> Ctx -> Ctx
 insertVar ty ctx = ctx { varCtx = ty : varCtx ctx }
 
+pickCVar :: MonadSoup m => Ctx -> m DeBruijnC
+pickCVar ctx = pick' "CVar" (toEnum <$> [0 .. length (cVarCtx ctx) - 1])
+
+lookupCVar :: DeBruijnC -> Ctx -> Maybe (EqProp DCId)
+lookupCVar (DeBruijnC n) ctx = listToMaybe $ drop (fromIntegral n) (cVarCtx ctx)
+
 insertCVar :: EqProp DCId -> Ctx -> Ctx
 insertCVar phi ctx = ctx { cVarCtx = phi : cVarCtx ctx }
 
@@ -287,14 +297,33 @@ heads ctx =
   | not noConstants
   ] ++
   (guard coercions *>
-  [ (L "Π'", freshes <&> \(eqProp, tyB) -> CoPi () eqProp tyB)
-  , (L "λ'", freshes <&> \(eqProp, b) -> CoAbs () eqProp b)
-  , (L ";'", freshes <&> \(b, c) -> CoApp b c)
-  , (L ":>", freshes <&> \(a, c) -> Coerce a c)
+  [ (L "Π'", fresh_ CoPi)
+  , (L "λ'", fresh_ CoAbs)
+  , (L ";'", fresh_ CoApp)
+  , (L ":>", fresh_ Coerce)
   ])
   where
     (<&>) :: Functor f => f a -> (a -> b) -> f b
     (<&>) = flip fmap
+
+headsC :: (WithParams, MonadSoup m) => Ctx -> [(L, m (Coercion_ Soup))]
+headsC ctx =
+  [ (L "CVar", pickCVar ctx <&> \x -> CVar x)
+  , (L "CRefl", fresh_ CRefl)
+  , (L "CRefl'", fresh_ CRefl')
+  , (L "CSym", fresh_ CSym)
+  , (L "CSeq", fresh_ CSeq)
+  , (L "CRed", fresh_ CRed)
+  , (L "CPi", pick' "Rel" [Rel, Irr] >>= \rel -> fresh_ (CPi rel))
+  , (L "CAbs", pick' "Rel" [Rel, Irr] >>= \rel -> fresh_ (CAbs rel))
+  , (L "CApp", pick' "Rel" [Rel, Irr] >>= \rel -> freshes <&> \(b, a) -> CApp b a rel)
+  , (L "CCoAbs", fresh_ CCoAbs)
+  , (L "CCoPi", fresh_ CCoPi)
+  , (L "CCoApp", fresh_ CCoApp)
+  ]
+
+fresh_ :: (FunConstraints t Fresh, MonadFresh m) => t -> m (Result t)
+fresh_ = createA_ (For :: For Fresh) fresh
 
 typeCheck' :: MonadSoup m => Ctx -> DCId -> DCore_ Soup -> m [K]
 typeCheck' _ctx tyT Star = do

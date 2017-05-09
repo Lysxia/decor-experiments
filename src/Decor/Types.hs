@@ -103,9 +103,6 @@ instance Show L where
 newtype DeBruijnV = DeBruijnV Integer
   deriving (Eq, Ord, Show, Enum)
 
-newtype DeBruijnC = DeBruijnC Integer
-  deriving (Eq, Ord, Show, Enum)
-
 type Shift = Integer
 
 shift :: DeBruijnV -> Shift -> DeBruijnV
@@ -113,6 +110,15 @@ shift (DeBruijnV i) s = DeBruijnV (i + s)
 
 asShift :: DeBruijnV -> Shift
 asShift (DeBruijnV i) = i
+
+newtype DeBruijnC = DeBruijnC Integer
+  deriving (Eq, Ord, Show, Enum)
+
+shiftC :: DeBruijnC -> Shift -> DeBruijnC
+shiftC (DeBruijnC i) s = DeBruijnC (i + s)
+
+asShiftC :: DeBruijnC -> Shift
+asShiftC (DeBruijnC i) = i
 
 data Constant
   = Nat
