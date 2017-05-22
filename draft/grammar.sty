@@ -1,0 +1,268 @@
+% Copyright 2011 Antal Spector-Zabusky
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{grammar}[2011/10/26 A DSL for context-free grammars]
+
+% \RequirePackage[ligature]{semantic}
+\RequirePackage{etoolbox}
+\RequirePackage{environ}
+\RequirePackage{semantic}
+
+% Interface:
+%   * The grammar environment is the primary way of accessing things; there's
+%     also a \grammarfragment command which doesn't turn on the line breaks.
+%     (Aligning things will still break, but spacing will work.)
+%   * -> and ::= automatically align.
+%   * | automatically aligns at the beginning of a line; it aligns based on the
+%     width of the grammar introduction symbol (-> or ::=).
+%   * \nl or a literal return means exactly that; consecutive ones are ignored,
+%     as are all newlines at the beginning or end of a grammar.
+%   * \continued at the end of a line suppresses the following linebreaks.
+%   * \indented makes the line skip the ->/::=/| column and function as a continuing
+%     rule body.
+%   * \spaced{#1} spaces out tokens intelligently.
+%   * \unspaced{#1} lays out something without space on either side.
+%   * \prespaced{#1} lays out something without space before if necessary, but
+%     without any space after.
+%   * \postspaced{#1} lays out something without space after if necessary, but
+%     without any space before.
+%   * <#1> lays out a spaced \nonterminal.
+%   * "#1" lays out a spaced \terminal.
+%   * <"#1"> lays out a spaced \pseudoterminal.
+%   * Feel free to redefine any of the above formatting commands.
+%   * Parentheses attempt to space themselves correctly by default (left
+%     parentheses are \prespaced, right parentheses are \postspaced).
+%   * The various special characters are all only active in math mode, and so
+%     can safely be used in embedded text; not coincedentally, the default
+%     definitions of the formatting commands place their arguments inside
+%     \text{...}.
+%   * \<, \>, \vert, and \" give you literal <, >, |, and "; \umlaut gives you
+%     the standard \"; \lparen and \rparen give you ordinary (non-spaced) left
+%     and right parentheses; \to gives you an ordinary \rightarrow; and
+%     \coloncoloneq gives you an ordinary ::=.
+%   * Since you're in an align* environment, \\ and & work, but should be
+%     considered low-level.
+%   * A heads-up: amsmath provides a command which relies on `(' having an
+%     ordinary mathcode, but this package sets it to "8000 (active in math
+%     mode).  We therefore have to patch this command.  This *shouldn't* be part
+%     of the interface, but it's possible that it will come up.
+
+% TODO:
+%   * Provide a way to insert space between multiple lines if there are multiple
+%     consecutive ^^Ms.  (This will probably go hand in hand with key-value
+%     options.)
+%   * Extend formatting:
+%     * Key-value arguments for the existing classes?  E.g.,
+%       [terminal = \textcolor{Purple}{\textbf{#1}}].
+%     * Key-value arguments for new classes, and/or a defining macro?  So that
+%       one can easily define terminal=<>, nonterminal="", etc.
+
+% This macro is from egreg's answer to ``How do you superimpose two symbols over
+% each other?'', at http://tex.stackexchange.com/questions/21644/21647#21647 ;
+% to understand ooalign, see egreg's answer to ``\subseteq + \circ as a single
+% symbol ("open subset")'', at
+% http://tex.stackexchange.com/questions/22371/22375#22375 .
+\newcommand{\rawsuperimpose}[2]{%
+  {\ooalign{$#1\@firstoftwo#2$\cr
+            \hidewidth$#1\@secondoftwo#2$\hidewidth\cr}}%
+}
+\newcommand{\superimpose}[2]{\mathpalette\rawsuperimpose{{#1}{#2}}}
+
+\newif\ifgrammar@fragment
+  % Are we in a \grammarfragment or in a grammar environment?
+
+\newcommand{\grammar@SetupSpaces}{%
+  % Only one space in a row
+  \newcommand{\grammar@needspace}{\def\grammar@condspace{\ \grammar@nospace}}%
+  \newcommand{\grammar@nospace}{\let\grammar@condspace\relax}%
+  \grammar@nospace
+  \def\spaced##1{\grammar@condspace##1\grammar@needspace}
+  \def\unspaced##1{\grammar@nospace##1\grammar@nospace}
+  \def\prespaced##1{\grammar@condspace##1\grammar@nospace}
+  \def\postspaced##1{\grammar@nospace##1\grammar@needspace}
+}
+
+\newcommand{\grammar@SetupFormattingCommands}{%
+  \let\continued\grammar@GobbleLinebreaks%
+  \def\indented{&\mathrel{\hphantom{\grammar@definitionseparator}}}%
+}
+
+% Just like \mathchardef, but has a fallback (intended to be the literal
+% mathcode) for use if the mathcode of the character is "8000.
+\newcommand{\grammar@mathchardef}[3]{%
+  \ifnum\mathcode#2="8000\relax
+    \mathchardef#1=#3\relax
+  \else
+    \mathchardef#1=\mathcode#2\relax
+  \fi
+}
+
+\newcommand{\grammar@SetupMathLiterals}{%
+  \let\umlaut\"%
+  \grammar@mathchardef {\<}      {`<} {"313C}%
+  \grammar@mathchardef {\>}      {`>} {"313E}%
+  \grammar@mathchardef {\"}      {`"} {"0022}%
+  \grammar@mathchardef {\lparen} {`(} {"4028}%
+  \grammar@mathchardef {\rparen} {`)} {"5029}%
+  % \vert already produces a |
+  % \to already produces a →
+  \newcommand*{\coloncoloneq}{\mathrel{::\relax=}}%
+    % The \relax here breaks up the infinite ligature loop; without it, ::=
+    % expands to something containing ::=, which expands to something containing
+    % ::=, which expands to ....
+}
+
+\newcommand{\grammar@SetupMathcodes}{%
+  \mathcode`\<="8000\relax
+  \mathcode`\"="8000\relax
+  \mathcode`\|="8000\relax
+  \mathcode`\(="8000\relax
+  \mathcode`\)="8000\relax
+}
+
+\newcommand{\grammar@SetupMathCharacters}{}
+\begingroup
+% Make sure the catcodes match \grammar@SetupMathcodes
+\catcode`\<=\active
+\lccode`\~=`\" % NOTE THIS!  Since we need to match non-active quotes in the
+               % macros, we cannot simply make " active willy-nilly.  Instead,
+               % we set the lccode of the already-active ~ to ", and \gdef our
+               % macro inside a \lowercase.  We then use " everywhere except
+               % where we want to define it; there, we write \def~##1", and the
+               % ~ is replaced by \lowercase.  This means that you CANNOT use
+               % uppercase letters or the tilde within
+               % \grammar@SetupMathCharacters, and " is the only "special
+               % chacter" that isn't active.
+\catcode`\|=\active
+\catcode`\(=\active
+\catcode`\)=\active
+\lowercase{\gdef\grammar@SetupMathCharacters{%
+  \gdef\grammar@definitionseparator{\rightarrow}
+  \def\grammar@startdefinitionwith##1{&##1\gdef\grammar@definitionseparator{##1}\grammar@nospace}
+  \ifgrammar@fragment
+    \mathlig{->}{\rightarrow}%
+  \else
+    \mathlig{->}{\grammar@startdefinitionwith{\rightarrow}}%
+    \mathlig{::=}{\grammar@startdefinitionwith{\coloncoloneq}}%
+  \fi
+  \def|{\mid\grammar@nospace}%
+  %
+  \def<{\@ifnextchar{"}{\grammar@DoPseudoterminal}{\grammar@DoNonterminal}}%
+  \def\grammar@DoNonterminal##1>{\spaced{\nonterminal{##1}}}%
+  \def\grammar@DoPseudoterminal"##1">{\spaced{\pseudoterminal{##1}}}%
+  \def~##1"{\spaced{\terminal{##1}}}%
+  %
+  \def({\prespaced{\lparen}}%
+  \def){\postspaced{\rparen}}%
+}}
+\endgroup
+
+% The amsmath package defines a command which attempts to insert a math
+% character which has the mathcode of `('.  Of course, since I've set that to
+% "8000, this breaks.  We patch this command to protect it from that (as long as
+% the command exists).
+\newcommand{\grammar@FixAmsmath}{
+  % If this fails, that's fine---either amsmath wasn't loaded or the command has
+  % changed not to require a parenthesis.  Either way, we don't *need* to patch
+  % it in that case.  (Of course, it *could* still require a parenthesis
+  % somewhere else in the command, or in another way.)
+  \patchcmd{\resetMathstrut@}{\mathchardef\@tempa\mathcode`\(}{\let\@tempa\lparen}{}{}
+}
+
+% We don't need to worry about the catcodes because | and friends are only
+% active in math mode.
+\newcommand{\grammar@SetupLinebreakCommands}{
+  \def\nl{%
+    \@ifnextchar\grammar@Done{%
+      % We're done with the grammar.  Consume the end-marker, or else we'll hit
+      % an infinite loop
+      \@gobble
+    }{%
+      \@ifnextchar\nl{%
+        % Skip consecutive newlines
+      }{%
+        \\%
+        \@ifnextchar|{%
+          % Align against a bar which is as wide as an arrow, and remove the
+          % orignal bar from the input.
+          &\mathrel{\superimpose{\hphantom{\grammar@definitionseparator}}{\vert}}\@gobble
+        }{%
+          % No need to align non-|s.
+        }%
+      }%
+    }%
+  }%
+}
+
+\newcommand{\grammar@GobbleLinebreaks}{}
+\newcommand{\grammar@MagicLinebreak}{}
+\begingroup
+\grammar@SetupLinebreakCommands
+% We use \grammar@GobbleLinebreaks to ignore all starting linebreaks.
+\gdef\grammar@GobbleLinebreaks{%
+  \@ifnextchar\nl{%
+    \expandafter\grammar@GobbleLinebreaks\@gobble
+  }{%
+    % No need to remove a non-newline.
+  }%
+}
+
+% We use \grammar@MagicLinebreak to construct the environment.
+\global\let\grammar@MagicLinebreak\nl
+\endgroup
+
+% We use \grammar@Done to indicate that we are done with the grammar; this
+% allows us to ignore trailing newlines.
+\newcommand{\grammar@Done}{}
+\def\grammar@Done{\grammar@Done}
+
+\newcommand{\grammar@SetupLinebreakCatcode}{%
+  \catcode`\^^M=\active%
+}
+
+\newcommand{\grammar@SetupLinebreakCharacter}{}
+\begingroup
+\grammar@SetupLinebreakCommands
+\grammar@SetupLinebreakCatcode%
+\gdef\grammar@SetupLinebreakCharacter{%
+  \let^^M\nl%
+}%
+\endgroup
+
+\newcommand{\grammar@SetupGeneral}{%
+  \grammar@SetupSpaces
+  \grammar@SetupFormattingCommands
+  \grammar@SetupMathLiterals
+  \grammar@SetupMathcodes
+  \grammar@SetupMathCharacters
+  \grammar@FixAmsmath
+}
+
+\newcommand{\grammar@SetupLinebreaks}{%
+  \grammar@SetupLinebreakCommands
+  \grammar@SetupLinebreakCatcode
+  \grammar@SetupLinebreakCharacter
+}
+
+% We specify \grammar@MagicLinebreak\grammar@Done so that we're guaranteed to
+% always have a newline before the end; multiple newlines are already handled by
+% the definition of ^^M.
+\NewEnviron{grammar}{\begin{align*}%
+  \BODY\grammar@MagicLinebreak\grammar@Done%
+\end{align*}}
+\pretocmd{\grammar}{%
+  \grammar@fragmentfalse
+  \grammar@SetupGeneral
+  \grammar@SetupLinebreaks
+}{}{}
+\apptocmd{\grammar}{%
+  \grammar@GobbleLinebreaks
+}{}{}
+
+\newcommand{\grammarfragment}{%
+  \grammar@fragmenttrue
+  \begingroup\grammar@SetupGeneral\grammar@dofragment}
+\newcommand{\grammar@dofragment}[1]{#1\endgroup}
+
+\newcommand{\nonterminal}[1]{\text{\textsf{#1}}}
+\newcommand{\terminal}[1]{\text{\texttt{#1}}}
+\newcommand{\pseudoterminal}[1]{\text{\textit{#1}}}

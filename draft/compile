@@ -1,0 +1,10 @@
+options=""
+# options+=--latex-engine=xelatex
+
+pandoc \
+  making-random-judgements.rst \
+  -f markdown+tex_math_double_backslash+raw_tex+yaml_metadata_block \
+  -t latex \
+  --template=templates/default.latex \
+  $options \
+  -o mrj.pdf
