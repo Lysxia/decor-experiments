@@ -250,6 +250,61 @@ judgement:
   {\lam{x}{\funtype{(\funtype{b}{b})}{a}}{\app{x}{(\lam{y}{b}{y})}}}
   {\funtype{(\funtype{(\funtype{b}{b})}{a})}{a}}\\]
 
+### Outline
+
+A **system** is given by:
+
+- a **syntax** of terms \\(x\\) given by some grammar;
+- a collection of **judgements**, i.e., tagged tuples \\(J(\bar{x})\\),
+  defined by a set of **inference rules**.
+
+\\[\infer{J_1(\bar{x_1}) \\ \dots \\ J_n(\bar{x_n})}{J_0(\bar{x_0})}\\]
+
+where \\(\bar{x_0}, \bar{x_1}, \dots, \bar{x_n}\\) are tuples of
+*partial terms*, which may have **unknowns** (or unknown metavariables) in
+place of subterms.
+
+We may preprocess inference rules to take the following shape:
+
+\\[\infer{
+  \bar{u_0} = \bar{x_0} \\ \bar{u_1} = \bar{x_1} \\ \dots \\ \bar{u_n} = \bar{x_n} \\\\
+  J_1(\bar{u_1}) \\ \dots \\ J_n(\bar{u_n})}
+  {J_0(\bar{u_0})}\\]
+
+where \\((\bar{u_i})\\) are tuples of unknowns, connected together by the equalities,
+which can be seen as a primitive kind of judgement.
+
+A **derivation** \\(D\\) is a directed graph whose edges are judgements, and nodes
+are inference rules (equalities are implicit). Each node has one predecessor
+(the conclusion of a rule) and zero or more successors (the premises).
+Following conclusions leads to a special dangling edge, the **root**.
+Following premises may lead to other dangling edges, the **leaves**.
+A **partial derivation** may have leaves, as opposed to a
+**complete derivation**.
+
+We **grow** a derivation by attaching new rules to the leaves. This corresponds
+to a non-deterministic relation between a derivation \\(D\\) and a new one
+\\(D'\\) having one more node, together with a set of equalities detached from
+it:
+
+\\[D \to_\mathrm{grow} D', E\\]
+
+We gather equalities to form a substitution by **unification**. This is a
+partial relation:
+
+\\[\Theta, E \to_\mathrm{unify} \Theta'\\]
+
+The **generator** is obtained by combining these relations.
+
+\\[D,\Theta \to_\mathrm{gen} D',\Theta' \quad\iff\quad
+   D\to_\mathrm{deriv}D',E \;\wedge\; \Theta,E \to_\mathrm{unify} \Theta' \\]
+
+We start from a partial derivation \\(D_0\\) consisting of a single edge dangling
+on both ends, and an empty substitution \\(\Theta_0\\).
+We maintain the invariant that, if we perform the current substitution
+\\(\Theta\\) on the current derivation \\(D\\), then every node is a valid
+*instantiation* of the corresponding inference rule of the input system.
+
 ### Occurs check
 
 In the previous example, in the last step, assume we chose the variable \\(x\\)
