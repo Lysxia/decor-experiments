@@ -250,18 +250,22 @@ judgement:
   {\lam{x}{\funtype{(\funtype{b}{b})}{a}}{\app{x}{(\lam{y}{b}{y})}}}
   {\funtype{(\funtype{(\funtype{b}{b})}{a})}{a}}\\]
 
-### Outline
+### Algorithm outline
 
-A **system** is given by:
+The algorithm seems to just be a reformulation of logic programming. It is
+described by a non-deterministic relation on derivations. Heuristics to prune
+the search space correspond to refinements of that relation.
 
-- a **syntax** of terms \\(x\\) given by some grammar;
+A **program** is given by:
+
+- a **syntax** of terms \\(x\\) via some grammar;
 - a collection of **judgements**, i.e., tagged tuples \\(J(\bar{x})\\),
   defined by a set of **inference rules**.
 
 \\[\infer{J_1(\bar{x_1}) \\ \dots \\ J_n(\bar{x_n})}{J_0(\bar{x_0})}\\]
 
 where \\(\bar{x_0}, \bar{x_1}, \dots, \bar{x_n}\\) are tuples of
-*partial terms*, which may have **unknowns** (or unknown metavariables) in
+*partial terms*, which may have **unknowns** (or logic variables) in
 place of subterms.
 
 We may preprocess inference rules to take the following shape:
@@ -279,31 +283,65 @@ are inference rules (equalities are implicit). Each node has one predecessor
 (the conclusion of a rule) and zero or more successors (the premises).
 Following conclusions leads to a special dangling edge, the **root**.
 Following premises may lead to other dangling edges, the **leaves**.
-A **partial derivation** may have leaves, as opposed to a
-**complete derivation**.
+A **partial derivation** may contain leaves and unknowns, as opposed to a
+**full derivation**.
 
-We **grow** a derivation by attaching new rules to the leaves. This corresponds
+A partial derivation is **valid** if at every node, corresponding to an
+inference rule, the conclusion and premises of that node in the
+derivation are *substitution instances* of those of the inference rule. Our
+goal is to find a valid full derivations.
+
+We grow a derivation by attaching new rules to the leaves. This corresponds
 to a non-deterministic relation between a derivation \\(D\\) and a new one
 \\(D'\\) having one more node, together with a set of equalities detached from
 it:
 
-\\[D \to_\mathrm{grow} D', E\\]
+\\[D \to_\mathrm{deriv} D', E\\]
 
-We gather equalities to form a substitution by **unification**. This is a
-partial relation:
+We gather equalities to form a substitution (mapping unknowns to partial terms)
+by **unification**. This is a partial relation:
 
-\\[\Theta, E \to_\mathrm{unify} \Theta'\\]
+\\[\theta, E \to_\mathrm{unify} \theta'\\]
 
 The **generator** is obtained by combining these relations.
 
-\\[D,\Theta \to_\mathrm{gen} D',\Theta' \quad\iff\quad
-   D\to_\mathrm{deriv}D',E \;\wedge\; \Theta,E \to_\mathrm{unify} \Theta' \\]
+\\[D,\theta \to_\mathrm{gen} D',\theta' \quad\iff\quad
+   \exists E. D\to_\mathrm{deriv}D',E \;\wedge\; \theta,E \to_\mathrm{unify} \theta' \\]
 
-We start from a partial derivation \\(D_0\\) consisting of a single edge dangling
-on both ends, and an empty substitution \\(\Theta_0\\).
-We maintain the invariant that, if we perform the current substitution
-\\(\Theta\\) on the current derivation \\(D\\), then every node is a valid
-*instantiation* of the corresponding inference rule of the input system.
+We start from a partial derivation \\(D_0\\) consisting of just the root, and
+an empty substitution \\(\theta_0\\), and we perform a random backtracking
+search in the graph defined by \\(\to_\mathrm{gen}\\).
+
+#### Results
+
+We maintain the invariant that applying the current substitution
+\\(\theta\\) on the current derivation \\(D\\) yields a valid derivation
+\\(D\theta\\).
+This ensures **soundness**: only valid derivations are reachable.
+
+A substitution \\(\theta'\\) is **more specific** than \\(\theta\\) if
+there exists \\(\theta_0\\) such that \\(\theta' = \theta\theta_0\\)
+(composing substitutions left to right).
+Soundness relies on the following indermediate results:
+
+- If \\(D\theta\\) is valid, then for all substitutions
+  \\(\theta'\\) more specific than \\(\theta\\),
+  \\(D\theta'\\) is valid.
+- If \\(D\theta\\) is valid and \\(D\to_\mathrm{deriv} D', E\\),
+  then for every susbstitution \\(\theta'\\) more specific than \\(\theta\\)
+  which also satisfies \\(E\\), \\(D\theta'\\) is valid.
+- If \\(\theta, E \to_\mathrm{unify} \theta'\\), then \\(\theta'\\)
+  is more specific than \\(\theta\\) and satisfies \\(E\\).
+
+Conversely, we also expect **completeness**, that every valid derivation
+is reachable. This relies on an intermediate result:
+
+- Let \\(D,\theta \to_\mathrm{gen} D',\theta'\\). By construction,
+  \\(D'\\) has one additional node attached to a leaf of \\(D\\).
+  For every derivation \\(D''\\) with the same node at that position,
+  for every substitution \\(\theta''\\) more specific than \\(\theta\\),
+  if \\(D''\theta''\\) is valid, then \\(\theta''\\) is more specific
+  than \\(\theta'\\).
 
 ### Occurs check
 
@@ -348,10 +386,49 @@ Then we get an infinite type:
 
 \\[T_1 = \funtype{(\funtype{T_5}{T_1})}{T_2}\\]
 
-A simple work around is of course to perform occurs checks. However this
-will not be sufficient with more elaborate type systems.
+A simple work around is of course to perform an occurs check in the definition
+of the relation \\(\to_\mathrm{unify}\\).
 
-### Polymorphism
+### Commutative choices
+
+We take a step \\(D,\theta \to_\mathrm{gen} D',\theta'\\) by choosing
+a leaf, and a rule to apply. However, a derivation can be constructed
+in any order. For instance, if we have a partial derivation with two leaves
+\\(a\\) and \\(b\\), instantiating \\(a\\) then \\(b\\) results in the same
+state as instantiating \\(b\\) then \\(a\\).
+
+A way to greatly reduce the branching factor here is to fix a leaf at every
+step. When we backtrack, we may try to apply other rules at that leaf,
+but we never try a different leaf.
+
+The resulting search procedure can be modelled as follows.
+A **leaf-pruning** assigns a leaf \\(L(D)\\) to every derivation \\(D\\).
+This induces a subrelation \\(\to_\mathrm{L}\\) of
+\\(\to_\mathrm{gen}\\) such that
+\\(D,\theta \to_\mathrm{L} D',\theta'\\) if and only if
+\\(D'\\) is obtained from \\(D\\) by attaching a node at leaf \\(L(D)\\)
+and \\(D,\theta \to_\mathrm{gen} D',\theta'\\).
+
+### Dead ends
+
+(not implemented)
+
+Given a state \\(D,\theta\\) leaf of \\(D\\) is a **dead end** if there is no
+\\(D',\theta'\\) such that \\(D,\theta \to_\mathrm{gen} D',\theta'\\) and such
+that \\(D'\\) is obtained by attaching a rule to that leaf in \\(D\\).
+
+By the converse of completeness, a dead end implies that the state
+\\(D,\theta\\) admits no full derivation as an instance, so we can backtrack
+immediately without checking other leaves.
+
+We conjecture that dead ends often persist for a long time, so that many states
+preceding the one where a dead end is found also have the same leaf as a dead
+end. Thus an optimization may be to backtrack to the latest state where
+that leaf is not a dead end, or it does not exist, though it is unclear to us
+whether this is more efficient than checking all leaves for dead ends at every
+step.
+
+### Polymorphism, substitutions, metafunctions
 
 The generation of well-typed terms is achieved by *unification* of
 unknown terms and types with *patterns* that appear in typing rules.
@@ -395,7 +472,7 @@ of patterns.
 \end{equation*}
 
 Metafunctions can be defined by pattern matching on the arguments.
-*Making Random Judgements* compiles metafunctions to inductive relations.
+*Making Random Judgements* compiles metafunctions clauses to inference rules.
 
 \begin{gather*}
 \infer
@@ -412,3 +489,23 @@ Metafunctions can be defined by pattern matching on the arguments.
   {\subst{\beta}{T}{\alpha} = \beta}
 \end{gather*}
 
+Inequations can be either considered as new primitives, requiring extra
+bookkeeping in addition to the substitution \\(\theta\\), or it can be defined
+using more inference rules.
+
+However, this translation of metafunctions forgets their "functional" nature.
+For instance, we can partially evaluate a substitution if we know the head of
+the input term.
+
+A more general situation is that of syntax directed rules, where an element of
+a leaf determines precisely one rule that can be immediately applied.
+
+### Proof search
+
+Generating well-typed terms can be seen as a proof search problem. A common
+approach there is to reformulate the proof system in a *canonical* way, such
+that there are fewer "equivalent solutions", thus greatly reducing the search
+space. This would be a welcome improvement in situation where we backtrack a
+lot. However, this seems at odds with the goal of random generation for
+testing, as the artifact under test may well hide bugs that affect
+non-canonical inputs.
