@@ -413,8 +413,8 @@ typeCheck' ctx tyT (CoApp a g) = do
     , KTypeC ctx (cctx ctx) g phi
     ]
 
-typeCheckC' :: MonadSoup m => Ctx -> EqProp DCId -> Coercion_ Soup -> m [K]
-typeCheckC' ctx (a :~: b) (CVar v) =
+typeCheckC' :: MonadSoup m => Ctx -> Ctx' -> EqProp DCId -> Coercion_ Soup -> m [K]
+typeCheckC' ctx _cctx (a :~: b) (CVar v) =
   case lookupCVar v ctx of
     Nothing -> MonadFail.fail "Unbound c-variable"
     Just (a' :~: b') ->
@@ -423,22 +423,39 @@ typeCheckC' ctx (a :~: b) (CVar v) =
         , kEqDC b (RHSId b' (asShift v + 1))
         ]
 
-typeCheckC' ctx (a :~: b) (CRefl a') =
+typeCheckC' ctx _cctx (a :~: b) (CRefl a') = do
+  tyA <- fresh
   return
     [ kEqDC a (RHSId a' 0)
     , kEqDC b (RHSId a' 0)
+    , K_ (KType ctx a' tyA)
     ]
 
-typeCheckC' ctx (a :~: b) (CSym g) =
+typeCheckC' ctx cctx (a :~: b) (CSym g) =
   return
-    [ KTypeC ctx (cctx ctx) g (b :~: a)
+    [ KTypeC ctx cctx g (b :~: a)
     ]
 
-typeCheckC' ctx (a :~: c) (CSeq g1 g2) = do
+typeCheckC' ctx cctx (a :~: c) (CSeq g1 g2) = do
   b <- fresh
   return
-    [ KTypeC ctx (cctx ctx) g1 (a :~: b)
-    , KTypeC ctx (cctx ctx) g2 (b :~: c)
+    [ KTypeC ctx cctx g1 (a :~: b)
+    , KTypeC ctx cctx g2 (b :~: c)
+    ]
+
+typeCheckC' ctx cctx (ty1 :~: ty2) (CAbs rel () ga gb) = do
+  (tyA1, tyA2, b1, b2, b3, tyStar) <- freshes
+  let ctx' = insertVar tyA1 ctx
+  return
+    [ kEqDC ty1 (RHSHead (Abs rel () tyA1 b1))
+    , kEqDC ty2 (RHSHead (Abs rel () tyA2 b3))
+    , KRel rel b1
+    , KRel rel b3
+    , KTypeC ctx cctx ga (tyA1 :~: tyA2)
+    , KTypeC ctx' cctx gb (b1 :~: b2)
+    , K_ (KType ctx tyA2 tyStar)
+    , kEqDC tyStar (RHSHead Star)
+    , error "eqSub" b3 b2 (error "{x :> sym g1 / x}")
     ]
 
 initK :: MonadSoup m => m ([K], DCId, DCId)
