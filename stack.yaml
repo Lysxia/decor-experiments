@@ -1,7 +1,7 @@
 flags: {}
 extra-package-dbs: []
 packages:
-- '.'
+- 'mrj'
 extra-deps:
 - QuickCheck-GenT-0.2.0
 - dictionary-sharing-0.1.0.0
